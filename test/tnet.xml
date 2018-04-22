@@ -1,0 +1,5 @@
+<network>
+    <name>tnet</name>
+    <forward mode='bridge'/>
+    <bridge name='tnet' />
+</network>
