@@ -3,7 +3,6 @@ package devices
 import (
 	"net"
 	"github.com/vishvananda/netlink"
-	"fmt"
 	"encoding/json"
 	"os"
 )
@@ -22,14 +21,14 @@ const (
 )
 
 var L2EventStrings = []string{
-	"L2 Device Created",
-	"L2 Device Deleted",
-	"L2 Device Status Flags set. Device UP",
-	"L2 Device Status Flags set. Device DOWN",
-	"L2 Device Status Flags set. Device LOWERLAYERDOWN",
-	"L2 Device Master Set",
-	"L2 Device Master Unset",
-	"L2 Device Transformed to L3 Device",
+	"L2 DeviceCreated",
+	"L2DeviceDeleted",
+	"L2DeviceUp",
+	"L2DeviceDown",
+	"L2DeviceLowerLayerDown",
+	"L2DeviceSetMaster",
+	"L2DeviceUnsetMaster",
+	"L2DeviceTransform",
 }
 
 func (e L2Event) String() string {
@@ -69,20 +68,24 @@ type L2Device struct {
 	Index            int      `json:"index"`
 	Status           L2Status `json:"status"`
 	Master           int      `json:"master"`
+	Namespace        string   `json:"namespace"`
 	flags            net.Flags
 	operState        netlink.LinkOperState
-	onchange         map[L2Event][]func(devIndex int, change L2Event)
+	onchange         map[L2Event][]func(dev L2Device, change L2Event)
 	flagsChannel     *chan l2DeviceFlagsEvent
 	setMasterChannel *chan l2DeviceMasterEvent
 	deleteChannel    *chan bool
 	dumpChannel      *chan bool
 }
 
-func NewL2Device(update netlink.Link, consoleDisplay bool) *L2Device {
-	defaultFunction := func(index int, change L2Event) {
-		fmt.Println("DEV ID:", index, "Event", int(change), "occured which means", change)
+func NewL2Device(update netlink.Link, namespace string,consoleDisplay bool) *L2Device {
+	defaultFunction := func(dev L2Device, change L2Event) {
+		t := make(map[string]interface{})
+		t["event"] = change.String()
+		t["data"] = dev
+		json.NewEncoder(os.Stdout).Encode(t)
 	}
-	onChange := make(map[L2Event][]func(devIndex int, change L2Event))
+	onChange := make(map[L2Event][]func(dev L2Device, change L2Event))
 	if consoleDisplay {
 		for i, _ := range L2EventStrings {
 			onChange[L2Event(i)] = append(onChange[L2Event(i)], defaultFunction)
@@ -97,6 +100,7 @@ func NewL2Device(update netlink.Link, consoleDisplay bool) *L2Device {
 		Name:             update.Attrs().Name,
 		Index:            update.Attrs().Index,
 		Master:           0,
+		Namespace:namespace,
 		flags:            net.Flags(0),
 		operState:        netlink.OperNotPresent,
 		onchange:         onChange,
@@ -115,7 +119,7 @@ func (dev *L2Device) l2EventChannel() l2Channel {
 
 func (dev *L2Device) fireChangeEvents(change L2Event) {
 	for _, f := range dev.onchange[change] {
-		f(dev.Index, change)
+		f(*dev, change)
 	}
 }
 

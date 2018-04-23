@@ -3,7 +3,6 @@ package devices
 import (
 	"net"
 	"github.com/vishvananda/netlink"
-	"fmt"
 	"encoding/json"
 	"os"
 )
@@ -25,10 +24,10 @@ const (
 )
 
 var L2BridgeEventStrings = []string{
-	"L2Bridge Created",
-	"L2Bridge Deleted",
-	"L2Bridge Port Added",
-	"L2Bridge Port Deleted",
+	"L2BridgeCreate",
+	"L2BridgeDelete",
+	"L2BridgeAddPort",
+	"L2BridgeDeletePort",
 }
 
 func (e L2BridgeEvent) String() string {
@@ -43,7 +42,7 @@ func (e L2BridgeEvent) String() string {
 type L2Bridge struct {
 	*L2Device
 	Ports         map[int]int
-	onchange      map[L2BridgeEvent][]func(devIndex int, event L2BridgeEvent)
+	onchange      map[L2BridgeEvent][]func(dev L2Bridge, event L2BridgeEvent)
 	masterChannel *chan l2DeviceMasterEvent
 }
 
@@ -61,18 +60,21 @@ func (dev *L2Bridge) RemovePort(devIndex int) {
 	}
 }
 
-func NewL2Bridge(update netlink.Link, consoleDisplay bool) *L2Bridge {
-	defaultFunction := func(index int, change L2BridgeEvent) {
-		fmt.Println("DEV ID:", index ,"Event", int(change), "occured which means", change)
+func NewL2Bridge(update netlink.Link, namespace string,consoleDisplay bool) *L2Bridge {
+	defaultFunction := func(dev L2Bridge, change L2BridgeEvent) {
+		t := make(map[string]interface{})
+		t["event"] = change.String()
+		t["data"] = dev
+		json.NewEncoder(os.Stdout).Encode(t)
 	}
-	onChange := make(map[L2BridgeEvent][]func(devIndex int, change L2BridgeEvent))
+	onChange := make(map[L2BridgeEvent][]func(dev L2Bridge, change L2BridgeEvent))
 	if consoleDisplay {
 		for i, _ := range L2BridgeEventStrings {
 			onChange[L2BridgeEvent(i)] = append(onChange[L2BridgeEvent(i)], defaultFunction)
 		}
 	}
 	l2br := &L2Bridge{
-		L2Device: NewL2Device(update, consoleDisplay),
+		L2Device: NewL2Device(update, namespace, consoleDisplay),
 		Ports:    make(map[int]int),
 		onchange: onChange,
 	}
@@ -82,7 +84,7 @@ func NewL2Bridge(update netlink.Link, consoleDisplay bool) *L2Bridge {
 
 func (dev *L2Bridge) fireChangeEvents(change L2BridgeEvent)  {
 	for _, f := range dev.onchange[change - L2BridgeEvent(bridgeIota)] {
-		f(dev.Index, change)
+		f(*dev, change)
 	}
 }
 

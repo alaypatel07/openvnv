@@ -4,7 +4,6 @@ import (
 	"github.com/vishvananda/netlink"
 	"fmt"
 	"net"
-	"io"
 	"errors"
 )
 
@@ -18,10 +17,10 @@ const (
 )
 
 var NSEventStrings = []string{
-	"NS Created",
-	"NS Deleted",
-	"NS Type Changed",
-	"NS Connected",
+	"NSCreate",
+	"NSDelete",
+	"NSTypeChange",
+	"NSConnect",
 }
 
 func (e NSEvent) String() string {
@@ -76,39 +75,6 @@ func NewNamespace(name string) Namespace {
 	return n
 }
 
-type Topology map[string]*Namespace
-
-var topology Topology
-var dumper io.Writer
-
-type Index int
-
-func GetDefaultNamespace() *Namespace {
-	return GetNamespaceTopology("default")
-}
-
-func init() {
-	topology = Make()
-}
-
-func SetWriter(w io.Writer) {
-	dumper = w
-	return
-}
-
-func GetTopology() Topology {
-	return topology
-}
-
-func GetNamespaceTopology(namespace string) *Namespace {
-	if t, ok := topology[namespace]; ok {
-		return t
-	}
-	t := NewNamespace(namespace)
-	topology[namespace] = &t
-	return &t
-}
-
 func (n Namespace) AddL2Device(update netlink.Link, consoleDisplay bool) {
 	index := update.Attrs().Index
 	if _, ok := n.L2Devices[index]; ok {
@@ -118,13 +84,13 @@ func (n Namespace) AddL2Device(update netlink.Link, consoleDisplay bool) {
 	var lu LinkUpdateReceiver
 	switch update.Type() {
 	case "bridge":
-		l := NewL2Bridge(update, consoleDisplay)
+		l := NewL2Bridge(update, n.Name,consoleDisplay)
 		l.SetFlags(update.Attrs().Flags, update.Attrs().OperState)
 		lu = l
 		n.L2Devices[update.Attrs().Index] = lu
 		go lu.ReceiveLinkUpdate()
 	default:
-		l := NewL2Device(update, consoleDisplay)
+		l := NewL2Device(update, n.Name, consoleDisplay)
 		l.SetFlags(update.Attrs().Flags, update.Attrs().OperState)
 		lu = l
 		go lu.ReceiveLinkUpdate()
@@ -205,6 +171,7 @@ func (n Namespace) fire(event NSEvent) {
 		callback(n, event)
 	}
 }
+
 func (n Namespace) SetType(s string) {
 	if n.Type == s {
 		return
@@ -215,21 +182,4 @@ func (n Namespace) SetType(s string) {
 
 func (n Namespace) Delete() {
 	n.fire(NSDelete)
-}
-
-func Make() Topology {
-	return Topology(make(map[string]*Namespace));
-}
-
-func DeleteNamespace(name string) {
-	if ns, ok := topology[name]; ok {
-		for index, _ := range ns.L2Devices {
-			ns.RemoveDevice(index)
-		}
-		for index, _ := range ns.L3Devices {
-			ns.RemoveDevice(index)
-		}
-		ns.Delete()
-		delete(topology, name)
-	}
 }
