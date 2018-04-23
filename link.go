@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"os"
 	"github.com/alaypatel07/openvnv/devices"
+	"runtime"
 )
 
 type byBridge []netlink.Link
@@ -33,6 +34,17 @@ func createNamespaceDeleteCallback() (func(namespace devices.Namespace, event de
 }
 
 func listenOnLinkMessagesWithExisting(namespace *devices.Namespace, targetNS *netns.NsHandle, consoleDisplay bool) {
+
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	if targetNS != nil {
+		err := netns.Set(*targetNS)
+		if err != nil {
+			fmt.Println("ERROR: SETTING GOROUTINE TO DOCKER NS: ", err, namespace)
+			return
+		}
+	}
 
 	callback, doneChannel := createNamespaceDeleteCallback()
 	namespace.OnChange(devices.NSDelete, callback)

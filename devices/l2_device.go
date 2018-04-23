@@ -5,6 +5,7 @@ import (
 	"github.com/vishvananda/netlink"
 	"encoding/json"
 	"os"
+	"fmt"
 )
 
 type L2Event int
@@ -92,12 +93,18 @@ func NewL2Device(update netlink.Link, namespace string,consoleDisplay bool) *L2D
 		}
 	}
 
+	link, err := netlink.LinkByIndex(update.Attrs().Index)
+	if err != nil {
+		fmt.Println("ERROR: GETTING L2 LINK", err, update.Attrs().Name, update.Attrs().Index)
+		return nil
+	}
+
 	l := make(chan l2DeviceFlagsEvent)
 	m := make(chan l2DeviceMasterEvent)
 	dumpChannel := make(chan bool)
 	deleteChannel := make(chan bool)
 	l2dev := L2Device{
-		Name:             update.Attrs().Name,
+		Name:             link.Attrs().Name,
 		Index:            update.Attrs().Index,
 		Master:           0,
 		Namespace:namespace,
