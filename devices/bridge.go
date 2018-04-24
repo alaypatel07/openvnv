@@ -60,7 +60,7 @@ func (dev *L2Bridge) RemovePort(devIndex int) {
 	}
 }
 
-func NewL2Bridge(update netlink.Link, namespace string,consoleDisplay bool) *L2Bridge {
+func NewL2Bridge(update netlink.Link, t *Topology,namespace string,consoleDisplay bool) *L2Bridge {
 	defaultFunction := func(dev L2Bridge, change L2BridgeEvent) {
 		t := make(map[string]interface{})
 		t["event"] = change.String()
@@ -74,7 +74,7 @@ func NewL2Bridge(update netlink.Link, namespace string,consoleDisplay bool) *L2B
 		}
 	}
 	l2br := &L2Bridge{
-		L2Device: NewL2Device(update, namespace, consoleDisplay),
+		L2Device: NewL2Device(update, t, namespace, consoleDisplay),
 		Ports:    make(map[int]int),
 		onchange: onChange,
 	}
@@ -120,6 +120,8 @@ func (dev *L2Bridge) ReceiveLinkUpdate() {
 			if d {
 				return
 			}
+		case n := <- *(dev.nameChannel):
+			dev.SetName(n)
 		}
 	}
 }

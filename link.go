@@ -67,6 +67,7 @@ func listenOnLinkMessagesWithExisting(namespace *devices.Namespace, targetNS *ne
 		select {
 		case update := <-lu:
 			if update.Header.Type == syscall.RTM_NEWLINK {
+				namespace.ChangeDeviceName(int(update.Attrs().Index), update.Attrs().Name)
 				if update.Change == 0xffffffff {
 					namespace.AddL2Device(&update, consoleDisplay)
 				} else if update.Change == 0x100 && update.Attrs().Index != 0 {

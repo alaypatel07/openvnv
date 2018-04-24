@@ -5,7 +5,6 @@ import (
 	"github.com/vishvananda/netlink"
 	"encoding/json"
 	"os"
-	"fmt"
 )
 
 type L2Event int
@@ -65,6 +64,7 @@ func (s L2Status) String() string {
 }
 
 type L2Device struct {
+	topology         *Topology
 	Name             string   `json:"name"`
 	Index            int      `json:"index"`
 	Status           L2Status `json:"status"`
@@ -76,10 +76,11 @@ type L2Device struct {
 	flagsChannel     *chan l2DeviceFlagsEvent
 	setMasterChannel *chan l2DeviceMasterEvent
 	deleteChannel    *chan bool
+	nameChannel      *chan string
 	dumpChannel      *chan bool
 }
 
-func NewL2Device(update netlink.Link, namespace string,consoleDisplay bool) *L2Device {
+func NewL2Device(update netlink.Link, t *Topology, namespace string, consoleDisplay bool) *L2Device {
 	defaultFunction := func(dev L2Device, change L2Event) {
 		t := make(map[string]interface{})
 		t["event"] = change.String()
@@ -93,27 +94,30 @@ func NewL2Device(update netlink.Link, namespace string,consoleDisplay bool) *L2D
 		}
 	}
 
-	link, err := netlink.LinkByIndex(update.Attrs().Index)
-	if err != nil {
-		fmt.Println("ERROR: GETTING L2 LINK", err, update.Attrs().Name, update.Attrs().Index)
-		return nil
-	}
+	//link, err := netlink.LinkByIndex(update.Attrs().Index)
+	//if err != nil {
+	//	fmt.Println("ERROR: GETTING L2 LINK", err, update.Attrs().Name, update.Attrs().Index)
+	//	return nil
+	//}
 
 	l := make(chan l2DeviceFlagsEvent)
 	m := make(chan l2DeviceMasterEvent)
 	dumpChannel := make(chan bool)
 	deleteChannel := make(chan bool)
+	nameChannel := make(chan string)
 	l2dev := L2Device{
-		Name:             link.Attrs().Name,
+		topology:         t,
+		Name:             update.Attrs().Name,
 		Index:            update.Attrs().Index,
 		Master:           0,
-		Namespace:namespace,
+		Namespace:        namespace,
 		flags:            net.Flags(0),
 		operState:        netlink.OperNotPresent,
 		onchange:         onChange,
 		flagsChannel:     &l,
 		setMasterChannel: &m,
 		deleteChannel:    &deleteChannel,
+		nameChannel:      &nameChannel,
 		dumpChannel:      &dumpChannel,
 	}
 	l2dev.CreateDevice()
@@ -121,7 +125,7 @@ func NewL2Device(update netlink.Link, namespace string,consoleDisplay bool) *L2D
 }
 
 func (dev *L2Device) l2EventChannel() l2Channel {
-	return newL2Channel(dev.Master, dev.setMasterChannel, dev.flagsChannel, dev.dumpChannel)
+	return newL2Channel(dev.Master, dev.setMasterChannel, dev.flagsChannel, dev.nameChannel, dev.dumpChannel)
 }
 
 func (dev *L2Device) fireChangeEvents(change L2Event) {
@@ -210,6 +214,15 @@ func (dev *L2Device) ReceiveLinkUpdate() {
 			if d {
 				return
 			}
+		case n := <- *(dev.nameChannel):
+			dev.SetName(n)
 		}
 	}
+}
+
+func (device *L2Device) SetName(s string) {
+	if device.Name == s {
+		return
+	}
+	device.Name = s
 }

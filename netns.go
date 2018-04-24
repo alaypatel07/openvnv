@@ -14,7 +14,9 @@ import (
 )
 
 func createDevices(namespace *devices.Namespace, consoleDisplay bool) {
-	fmt.Println("Processing devices in namespace, ", namespace.Name)
+	if consoleDisplay{
+		fmt.Println("Processing devices in namespace, ", namespace.Name)
+	}
 	links, err := netlink.LinkList()
 	if err != nil {
 		fmt.Println("ERROR: GETTING DEVICES IN DOCKER NS: ", err, namespace)
@@ -25,7 +27,9 @@ func createDevices(namespace *devices.Namespace, consoleDisplay bool) {
 	for _, value := range links {
 		namespace.AddL2Device(value, consoleDisplay)
 	}
-	fmt.Println("Processing devices in namespace, ", namespace.Name, "...Done")
+	if consoleDisplay{
+		fmt.Println("Processing devices in namespace, ", namespace.Name, "...Done")
+	}
 }
 
 func createExistingNamespaces(consoleDisplay bool) {
@@ -69,7 +73,7 @@ func createExistingNamespaces(consoleDisplay bool) {
 			fmt.Println("ERROR: SETTING GOROUTINE TO DOCKER NS: ", err, namespace)
 			return
 		}
-		t := topology.CreateNamespace(container.ID)
+		t := topology.CreateNamespace(container.ID, &targetNS)
 		createDevices(t, consoleDisplay)
 		err = netns.Set(defaultNS)
 		if err != nil {

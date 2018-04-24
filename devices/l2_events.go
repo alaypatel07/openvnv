@@ -27,9 +27,11 @@ type l2Channel struct {
 	master        int
 	masterChannel *chan l2DeviceMasterEvent
 	flagsChannel  *chan l2DeviceFlagsEvent
+	nameChannel   *chan string
 	dump          *chan bool
 }
 
-func newL2Channel(masterIndex int, m *chan l2DeviceMasterEvent, f *chan l2DeviceFlagsEvent, d *chan bool) l2Channel {
-	return l2Channel{masterIndex, m, f, d}
+func newL2Channel(masterIndex int, m *chan l2DeviceMasterEvent, f *chan l2DeviceFlagsEvent, n *chan string,
+	d *chan bool) l2Channel {
+	return l2Channel{masterIndex, m, f, n, d}
 }

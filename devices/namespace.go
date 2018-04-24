@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"net"
 	"errors"
+	"github.com/vishvananda/netns"
 )
 
 type NSEvent int
 
 const (
-	NSCreate            NSEvent = iota
+	NSCreate     NSEvent = iota
 	NSDelete
 	NSTypeChange
 	NSConnect
@@ -39,12 +40,15 @@ func SubscribeAllNamespaceEvents(callback func(Namespace, NSEvent)) {
 }
 
 type Namespace struct {
-	Name        string
-	Type        string
-	L2Devices   map[int]LinkUpdateReceiver
-	L3Devices   map[int]LinkAddrUpdateReceiver
-	Connections map[string]Namespace
-	onchange    map[NSEvent][]func(namespace Namespace, change NSEvent)
+	Name           string
+	Type           string
+	nsHandle       *netns.NsHandle
+	L2Devices      map[int]LinkUpdateReceiver
+	L3Devices      map[int]LinkAddrUpdateReceiver
+	Connections    map[string]Namespace
+	onchange       map[NSEvent][]func(namespace Namespace, change NSEvent)
+	topology       *Topology
+	peeringChannel *chan PeerEvent
 }
 
 func (n Namespace) OnChange(event NSEvent, callback func(Namespace, NSEvent)) error {
@@ -55,13 +59,17 @@ func (n Namespace) OnChange(event NSEvent, callback func(Namespace, NSEvent)) er
 	return nil
 }
 
-func NewNamespace(name string) Namespace {
+func NewNamespace(name string, t *Topology, targetNs *netns.NsHandle) Namespace {
+	p := make(chan PeerEvent)
 	n := Namespace{
-		Name:        name,
-		L2Devices:   make(map[int]LinkUpdateReceiver),
-		L3Devices:   make(map[int]LinkAddrUpdateReceiver),
-		Connections: make(map[string]Namespace),
-		onchange:    make(map[NSEvent][]func(Namespace, NSEvent)),
+		Name:           name,
+		L2Devices:      make(map[int]LinkUpdateReceiver),
+		L3Devices:      make(map[int]LinkAddrUpdateReceiver),
+		Connections:    make(map[string]Namespace),
+		nsHandle:       targetNs,
+		topology:       t,
+		onchange:       make(map[NSEvent][]func(Namespace, NSEvent)),
+		peeringChannel: &p,
 	}
 	for index, _ := range NSEventStrings {
 		for _, defaultCallback := range defaultSubscriber {
@@ -84,13 +92,22 @@ func (n Namespace) AddL2Device(update netlink.Link, consoleDisplay bool) {
 	var lu LinkUpdateReceiver
 	switch update.Type() {
 	case "bridge":
-		l := NewL2Bridge(update, n.Name,consoleDisplay)
+		l := NewL2Bridge(update, n.topology, n.Name, consoleDisplay)
 		l.SetFlags(update.Attrs().Flags, update.Attrs().OperState)
 		lu = l
 		n.L2Devices[update.Attrs().Index] = lu
 		go lu.ReceiveLinkUpdate()
+	case "veth":
+		v, err := NewVeth(update, n.topology, n.Name, consoleDisplay)
+		if err != nil {
+			fmt.Println("ERROR IN GETTING NEW VETH INTERFACE", err)
+		}
+		v.SetFlags(update.Attrs().Flags, update.Attrs().OperState)
+		lu = v
+		n.L2Devices[update.Attrs().Index] = lu
+		go lu.ReceiveLinkUpdate()
 	default:
-		l := NewL2Device(update, n.Name, consoleDisplay)
+		l := NewL2Device(update, n.topology, n.Name, consoleDisplay)
 		l.SetFlags(update.Attrs().Flags, update.Attrs().OperState)
 		lu = l
 		go lu.ReceiveLinkUpdate()
@@ -109,6 +126,8 @@ func (n Namespace) RemoveDevice(index int) {
 			d.DeleteDevice()
 		} else if d, ok := dev.(*L2Bridge); ok {
 			d.DeleteDevice()
+		} else if d, ok := dev.(*Veth); ok {
+			d.DeleteDevice()
 		}
 		delete(n.L2Devices, index)
 	}
@@ -124,7 +143,7 @@ func (n Namespace) SetFlags(index int, f net.Flags, o netlink.LinkOperState) {
 
 	}
 	//TODO
-	//if d, ok := t.L3Devices[index]; ok {
+	//if d, ok := topology.L3Devices[index]; ok {
 	//}
 }
 
@@ -170,6 +189,61 @@ func (n Namespace) fire(event NSEvent) {
 	for _, callback := range n.onchange[event] {
 		callback(n, event)
 	}
+}
+
+func (n Namespace) ChangeDeviceName(devIndex int, newName string) {
+	if d, ok := n.L2Devices[devIndex]; ok {
+		*d.l2EventChannel().nameChannel <- newName
+	}
+}
+
+func (n *Namespace) SendVPCreateEvent(event PeerEvent) {
+	if e, ok := n.topology.buffer[event.GetIndex()]; ok {
+		if e.Event == VPDelete {
+			n.topology.RemoveFromBuffer(event.GetIndex())
+			n.topology.Connect(event.Namespace, e.PeerNamespace)
+		}
+	} else if e, ok := n.topology.GetPeerEvent(event); ok {
+		if e.Event == VPCreate {
+			n.topology.RemoveFromBuffer(event.GetPeerIndex())
+			n.topology.Connect(event.Namespace, e.Namespace)
+		}
+	} else {
+		n.topology.AddToBuffer(event)
+	}
+}
+
+func (n *Namespace) SendVPDeleteEvent(event PeerEvent) {
+	//if e, ok := n.topology.buffer[event.GetIndex()]; ok {
+	//	//n.topology.Connect()
+	//}
+	if e, ok := n.topology.GetPeerEvent(event); ok {
+		if e.Event == VPDelete {
+			n.topology.RemoveFromBuffer(event.GetPeerIndex())
+			n.topology.Disconnect(e.Namespace, event.Namespace)
+		}
+	} else {
+		n.topology.AddToBuffer(event)
+	}
+}
+
+func (n Namespace) Connect(ns string) {
+	if nTemp, ok := n.Connections[ns]; ok {
+		if nTemp.Name == ns {
+			return
+		}
+	}
+	n.Connections[ns] = *n.topology.Get(ns)
+	return
+}
+
+func (n Namespace) Disconnect(ns string) {
+	if nTemp, ok := n.Connections[ns]; ok {
+		if nTemp.Name == ns {
+			delete(n.Connections, ns)
+		}
+	}
+	return
 }
 
 func (n Namespace) SetType(s string) {

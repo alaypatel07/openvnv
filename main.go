@@ -72,7 +72,6 @@ func netnsTopoligy() {
 }
 
 func processNewNamespace(name string, consoleDisplay bool) {
-	t := topology.CreateNamespace(name)
 	targetNS, err := netns.GetFromDocker(name)
 	if err != nil {
 		fmt.Println("ERROR: GETTING DOCKER NS: ", err, namespace)
@@ -87,6 +86,7 @@ func processNewNamespace(name string, consoleDisplay bool) {
 	}
 
 	err = netns.Set(targetNS)
+	t := topology.CreateNamespace(name, &targetNS)
 	if err != nil {
 		fmt.Println("ERROR: SETTING GOROUTINE TO DOCKER NS: ", err, namespace)
 		return
@@ -114,12 +114,12 @@ func dumpTopology() {
 			os.Exit(1)
 		}
 		if text == "bye" {
-			for ns, _ := range topology {
+			for ns, _ := range topology.Namespaces {
 				topology.DeleteNamespace(ns)
 			}
 			os.Exit(0)
 		} else if text == "*" {
-			for ns, n := range topology {
+			for ns, n := range topology.Namespaces {
 				fmt.Println("\nDevices for namespace", ns)
 				n.DumpAll()
 			}
