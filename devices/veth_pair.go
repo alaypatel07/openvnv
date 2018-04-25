@@ -10,20 +10,14 @@ const (
 )
 
 type PeerEvent struct {
-	Index         int
-	PeerIndex     int
-	PeerNamespace string
-	Namespace     string
+	*Veth
 	Event		  VethPairEvent
 }
 
-func NewPeerEvent (index, peerIndex int, namespace, peerNamespace string, event VethPairEvent) PeerEvent {
+func NewPeerEvent (v *Veth, event VethPairEvent) PeerEvent {
 	return PeerEvent{
-		Index:index,
-		PeerIndex:peerIndex,
-		Namespace:namespace,
-		PeerNamespace:peerNamespace,
-		Event:event,
+		v,
+		event,
 	}
 }
 

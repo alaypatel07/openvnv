@@ -5,18 +5,21 @@ import (
 	"time"
 	"github.com/vishvananda/netns"
 	"fmt"
+	"sync"
 )
 
 type Topology struct {
 	Namespaces map[string]*Namespace
 	buffer     map[string]PeerEvent
+	sync.Mutex
 }
 
 func NewTopology() *Topology {
-	return &Topology{
-		make(map[string]*Namespace),
-		make(map[string]PeerEvent),
+	t := Topology{
+		Namespaces: make(map[string]*Namespace),
+		buffer:     make(map[string]PeerEvent),
 	}
+	return &t
 }
 
 func (t *Topology) GetNamespaces() map[string]*Namespace {
@@ -70,19 +73,35 @@ func (t *Topology) DeleteNamespace(namespace string) {
 }
 
 func (t *Topology) AddToBuffer(event PeerEvent) {
+	t.Lock()
 	t.buffer[event.GetIndex()] = event
+	t.Unlock()
 }
 
 func (t *Topology) GetPeerEvent(event PeerEvent) (PeerEvent, bool) {
+	t.Lock()
 	if e, ok := t.buffer[event.GetPeerIndex()]; ok {
-		t.RemoveFromBuffer(e.GetIndex())
+		t.Unlock()
 		return e, ok
 	}
+	t.Unlock()
+	return PeerEvent{}, false
+}
+
+func (t *Topology) GetEvent(event PeerEvent) (PeerEvent, bool) {
+	t.Lock()
+	if e, ok := t.buffer[event.GetIndex()]; ok {
+		t.Unlock()
+		return e, ok
+	}
+	t.Unlock()
 	return PeerEvent{}, false
 }
 
 func (t *Topology) RemoveFromBuffer(index string) {
+	t.Lock()
 	delete(t.buffer, index)
+	t.Unlock()
 }
 
 func (t *Topology) Connect(ns1, ns2 string) {

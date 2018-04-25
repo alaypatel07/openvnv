@@ -106,6 +106,7 @@ func (n Namespace) AddL2Device(update netlink.Link, consoleDisplay bool) {
 		lu = v
 		n.L2Devices[update.Attrs().Index] = lu
 		go lu.ReceiveLinkUpdate()
+		n.SetMaster(update.Attrs().Index, update.Attrs().MasterIndex)
 	default:
 		l := NewL2Device(update, n.topology, n.Name, consoleDisplay)
 		l.SetFlags(update.Attrs().Flags, update.Attrs().OperState)
@@ -198,33 +199,53 @@ func (n Namespace) ChangeDeviceName(devIndex int, newName string) {
 }
 
 func (n *Namespace) SendVPCreateEvent(event PeerEvent) {
-	if e, ok := n.topology.buffer[event.GetIndex()]; ok {
+	//fmt.Printf("CREATE %+v %+v\n", *event.Veth, event.Event)
+	if e, ok := n.topology.GetEvent(event); ok {
 		if e.Event == VPDelete {
+			//fmt.Println("create Got own event\n")
 			n.topology.RemoveFromBuffer(event.GetIndex())
-			n.topology.Connect(event.Namespace, e.PeerNamespace)
+			n.topology.Connect(e.PeerNamespace, event.Namespace)
+			event.CopyPeer(e.Veth)
+			n.topology.Get(e.PeerNamespace).SetVethPeer(e.PeerIndex, event.Veth)
+			return
 		}
 	} else if e, ok := n.topology.GetPeerEvent(event); ok {
+		//fmt.Println("Create Got peer event\n")
 		if e.Event == VPCreate {
 			n.topology.RemoveFromBuffer(event.GetPeerIndex())
 			n.topology.Connect(event.Namespace, e.Namespace)
+			event.Pair(e.Veth)
+			e.Pair(event.Veth)
+			return
 		}
-	} else {
-		n.topology.AddToBuffer(event)
 	}
+	n.topology.AddToBuffer(event)
 }
 
 func (n *Namespace) SendVPDeleteEvent(event PeerEvent) {
 	//if e, ok := n.topology.buffer[event.GetIndex()]; ok {
 	//	//n.topology.Connect()
 	//}
-	if e, ok := n.topology.GetPeerEvent(event); ok {
+	//fmt.Printf("Delete %+v %+v\n", *event.Veth, event.Event)
+	if e, ok := n.topology.GetEvent(event); ok {
+		//fmt.Println("Got own event\n")
+		if e.Event == VPCreate {
+			n.topology.RemoveFromBuffer(event.GetIndex())
+			n.topology.Connect(e.Namespace, event.PeerNamespace)
+			e.CopyPeer(event.Veth)
+			n.topology.Get(e.PeerNamespace).SetVethPeer(e.PeerIndex, e.Veth)
+
+			return
+		}
+	} else if e, ok := n.topology.GetPeerEvent(event); ok {
+		//fmt.Println("Got peer event\n")
 		if e.Event == VPDelete {
 			n.topology.RemoveFromBuffer(event.GetPeerIndex())
 			n.topology.Disconnect(e.Namespace, event.Namespace)
+			return
 		}
-	} else {
-		n.topology.AddToBuffer(event)
 	}
+	n.topology.AddToBuffer(event)
 }
 
 func (n Namespace) Connect(ns string) {
@@ -242,6 +263,14 @@ func (n Namespace) Disconnect(ns string) {
 		if nTemp.Name == ns {
 			delete(n.Connections, ns)
 		}
+	}
+	return
+}
+
+func (n Namespace) SetVethPeer(dev int, peer *Veth)  {
+	if d, ok := n.L2Devices[dev]; ok {
+		v := d.(*Veth)
+		v.Pair(peer)
 	}
 	return
 }

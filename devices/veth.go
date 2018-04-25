@@ -7,13 +7,14 @@ import (
 	"fmt"
 	"runtime"
 	"github.com/vishvananda/netns"
+	"time"
 )
 
 type Veth struct {
 	*L2Device
 	PeerName      string
 	PeerIndex     int
-	peerNamespace string
+	PeerNamespace string
 }
 
 func NewVeth(update netlink.Link, t *Topology,namespace string, consoleDisplay bool) (*Veth, error) {
@@ -25,10 +26,11 @@ func NewVeth(update netlink.Link, t *Topology,namespace string, consoleDisplay b
 		"",
 	}
 	func() {
+		//<- time.After(100 * time.Millisecond)
 		if peer, ok := v.isPeerVisible(); ok {
 			v.PeerName = peer.Name
 			v.PeerIndex = peer.Index
-			v.peerNamespace = v.Namespace
+			v.PeerNamespace = v.Namespace
 		} else {
 			//fmt.Println(v.Index, v.PeerIndex, v.Namespace, "VETH CREATE")
 			v.raiseCreateEvent()
@@ -37,18 +39,34 @@ func NewVeth(update netlink.Link, t *Topology,namespace string, consoleDisplay b
 	return v, nil
 }
 
+func (v *Veth) Pair(peer *Veth) {
+	fmt.Println("Pairing", v.Name, v.Namespace[:7], "with", peer.Name, peer.Namespace[:7])
+	v.PeerNamespace = peer.Namespace
+	v.PeerName = peer.Name
+	v.PeerIndex = peer.Index
+}
+
+func (v *Veth) CopyPeer(peer *Veth) {
+	v.PeerNamespace = peer.PeerNamespace
+	v.PeerName = peer.PeerName
+	v.PeerIndex = peer.PeerIndex
+}
+
 func (v *Veth) raiseCreateEvent() {
-	e := NewPeerEvent(v.Index, v.PeerIndex, v.Namespace, "", VPCreate)
+	e := NewPeerEvent(v, VPCreate)
 	v.topology.Get(v.Namespace).SendVPCreateEvent(e)
 }
 
 func (v *Veth) raiseDeleteEvent() {
-	e := NewPeerEvent(v.Index, v.PeerIndex, v.Namespace, v.peerNamespace, VPDelete)
+	e := NewPeerEvent(v, VPDelete)
+	//fmt.Printf("Raise Delete Event %+v\n", e.Veth)
 	v.topology.Get(v.Namespace).SendVPDeleteEvent(e)
 }
 
 func (v *Veth) isPeerVisible() (*netlink.Veth, bool) {
 	//<- time.After(50 * time.Millisecond)
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	err :=  netns.Set(*v.topology.Get(v.Namespace).nsHandle)
 	if err != nil {
 		fmt.Println("ERROR: SETTING NS TO ", v.Namespace, err)
@@ -59,10 +77,16 @@ func (v *Veth) isPeerVisible() (*netlink.Veth, bool) {
 		fmt.Println("ERROR: GETTING LINK", v.Namespace, err)
 		return nil, false
 	}
+	v.Name = t.Attrs().Name
 	d, err := netlink.VethPeerIndex(t.(*netlink.Veth))
 	if err != nil {
-		fmt.Println("ERROR: GETTING PEER INDEX in NS", v.Namespace, err)
-		return nil, false
+		//fmt.Println("ERROR: GETTING PEER INDEX in NS", v.Namespace, err)
+		<-time.After(500 * time.Millisecond)
+		d, err = netlink.VethPeerIndex(t.(*netlink.Veth))
+		if err != nil {
+			fmt.Println("ERROR: GETTING PEER INDEX in NS even after 500 milliseconds", v.Namespace, err, t.Attrs().ParentIndex)
+			return nil, false
+		}
 	}
 	v.SetPeerIndex(d)
 	p, err := netlink.LinkByIndex(d)
@@ -107,9 +131,10 @@ func (v *Veth) ReceiveLinkUpdate() {
 }
 
 func (v *Veth) DeleteDevice() {
+	//fmt.Println("Delete VETH")
 	*v.deleteChannel <- true
 	v.fireChangeEvents(L2DeviceDelete)
-	//fmt.Println("Index:", v.Index, " Peer Index:", v.PeerIndex, "Namespace:", v.Namespace, "Peer Namespace:, ", v.peerNamespace, "VETH DELETE")
+	//fmt.Println("Index:", v.Index, " Peer Index:", v.PeerIndex, "Namespace:", v.Namespace, "Peer Namespace:, ", v.PeerNamespace, "VETH DELETE")
 	v.raiseDeleteEvent()
 }
 
@@ -119,7 +144,7 @@ func (v *Veth) SetName(s string) {
 	}
 	v.Name = s
 }
-func (veth *Veth) SetPeerIndex(i int) {
-	veth.PeerIndex = i
+func (v *Veth) SetPeerIndex(i int) {
+	v.PeerIndex = i
 }
 
