@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+gofmt -w ./
+goimports -w ./
+
 env GOOS=linux GOARCH=amd64 go build -o ./main ./
 
 

@@ -2,10 +2,11 @@ package main
 
 import (
 	"fmt"
+	"os"
+
 	"github.com/alaypatel07/openvnv/devices"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
-	"os"
 )
 
 func listenOnAddressMessages(namespace *devices.Namespace, targetNs *netns.NsHandle) {

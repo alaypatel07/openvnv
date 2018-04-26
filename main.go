@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/alaypatel07/openvnv/devices"
-	"github.com/vishvananda/netns"
 	"io"
 	"net"
 	"os"
@@ -14,6 +12,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/alaypatel07/openvnv/devices"
+	"github.com/vishvananda/netlink"
+	"github.com/vishvananda/netns"
 )
 
 var namespace *devices.Namespace
@@ -53,6 +55,27 @@ func defaultNSCallback() func(namespace *devices.Namespace, event devices.NSEven
 		return keys
 	}
 
+	getRoutes := func(routes []netlink.Route) []map[string]string {
+		t := make([]map[string]string, len(routes))
+		for i, r := range routes {
+			m := make(map[string]string)
+			if r.Src != nil {
+				m["source"] = fmt.Sprintf("%s", r.Src)
+			}
+			if r.Dst != nil {
+				m["destination"] = fmt.Sprintf("%s", r.Dst)
+			}
+			if r.Gw != nil {
+				m["gateway"] = fmt.Sprintf("%s", r.Gw)
+			}
+			if r.NewDst != nil {
+				m["nexthop"] = fmt.Sprintf("Dst: %s", r.NewDst)
+			}
+			t[i] = m
+		}
+		return t
+	}
+
 	return func(namespace *devices.Namespace, change devices.NSEvent) {
 		t := make(map[string]interface{})
 		t["event"] = change.String()
@@ -64,6 +87,10 @@ func defaultNSCallback() func(namespace *devices.Namespace, event devices.NSEven
 			t["connections"] = getKeys(namespace.Connections)
 		case devices.NSDisconnect:
 			t["connections"] = getKeys(namespace.Connections)
+		case devices.NSRouteAdd:
+			t["route"] = getRoutes(namespace.Routes)
+		case devices.NSRouteDelete:
+			t["route"] = getRoutes(namespace.Routes)
 		}
 		encoder.Encode(t)
 	}
@@ -188,6 +215,7 @@ func dumpTopology() {
 		} else if text == "*" {
 			for ns, n := range topology.Namespaces {
 				fmt.Println("\nDevices for namespace", ns)
+				fmt.Println(n.Routes)
 				n.DumpAll()
 			}
 		} else if text == "help" {

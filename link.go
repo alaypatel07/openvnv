@@ -2,13 +2,14 @@ package main
 
 import (
 	"fmt"
-	"github.com/alaypatel07/openvnv/devices"
-	"github.com/vishvananda/netlink"
-	"github.com/vishvananda/netns"
 	"log"
 	"os"
 	"runtime"
 	"syscall"
+
+	"github.com/alaypatel07/openvnv/devices"
+	"github.com/vishvananda/netlink"
+	"github.com/vishvananda/netns"
 )
 
 type byBridge []netlink.Link

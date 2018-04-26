@@ -17,6 +17,8 @@ const (
 	NSTypeChange
 	NSConnect
 	NSDisconnect
+	NSRouteAdd
+	NSRouteDelete
 )
 
 var NSEventStrings = []string{
@@ -25,6 +27,8 @@ var NSEventStrings = []string{
 	"NSTypeChange",
 	"NSConnect",
 	"NSDisconnect",
+	"NSRouteAdd",
+	"NSRouteDelete",
 }
 
 func (e NSEvent) String() string {
@@ -50,6 +54,7 @@ type Namespace struct {
 	L3Devices      map[int]LinkAddrUpdateReceiver
 	Connections    map[string]string
 	onchange       map[NSEvent][]func(namespace *Namespace, change NSEvent)
+	Routes         []netlink.Route
 	topology       *Topology
 	peeringChannel *chan PeerEvent
 	Event          string `json:"event"`
@@ -65,6 +70,7 @@ func (n *Namespace) OnChange(event NSEvent, callback func(*Namespace, NSEvent)) 
 
 func NewNamespace(name string, t *Topology, targetNs *netns.NsHandle) Namespace {
 	p := make(chan PeerEvent)
+	r := make([]netlink.Route, 0)
 	n := Namespace{
 		Name:           name,
 		L2Devices:      make(map[int]LinkUpdateReceiver),
@@ -73,6 +79,7 @@ func NewNamespace(name string, t *Topology, targetNs *netns.NsHandle) Namespace 
 		nsHandle:       targetNs,
 		topology:       t,
 		onchange:       make(map[NSEvent][]func(*Namespace, NSEvent)),
+		Routes:         r,
 		peeringChannel: &p,
 	}
 	for index, _ := range NSEventStrings {
@@ -335,5 +342,21 @@ func (n *Namespace) SetType(s string) {
 }
 
 func (n *Namespace) Delete() {
+	for _, r := range n.Routes {
+		n.DeleteRoute(r)
+	}
 	n.fire(NSDelete)
+}
+func (n *Namespace) AddRoute(route netlink.Route) {
+	n.Routes = append(n.Routes, route)
+	n.fire(NSRouteAdd)
+}
+
+func (n *Namespace) DeleteRoute(route netlink.Route) {
+	for i, r := range n.Routes {
+		if route.Equal(r) {
+			n.Routes = append(n.Routes[0:i], n.Routes[i+1:]...)
+			n.fire(NSRouteDelete)
+		}
+	}
 }

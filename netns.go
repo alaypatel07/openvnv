@@ -3,14 +3,15 @@ package main
 import (
 	"context"
 	"fmt"
+	"runtime"
+	"sort"
+
 	"github.com/alaypatel07/openvnv/devices"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
-	"runtime"
-	"sort"
 )
 
 var nameLimit = 10
@@ -34,6 +35,13 @@ func createDevices(namespace *devices.Namespace, consoleDisplay bool) {
 		}
 		namespace.AddL3Device(link.Attrs().Index, addrs, consoleDisplay)
 	}
+	routes, err := netlink.RouteList(nil, netlink.FAMILY_ALL)
+	if err != nil {
+		fmt.Println("ERROR GETTING ROUTES IN NS", namespace.Name, err)
+	}
+	for _, route := range routes {
+		namespace.AddRoute(route)
+	}
 	if consoleDisplay {
 		fmt.Println("Processing devices in namespace, ", namespace.Name, "...Done")
 	}
@@ -53,6 +61,7 @@ func createExistingNamespaces(consoleDisplay bool) {
 
 	go listenOnLinkMessagesWithExisting(namespace, nil, consoleDisplay)
 	go listenOnAddressMessages(namespace, nil)
+	go listenOnRouteMessages(namespace, nil)
 
 	containerList, err := cli.ContainerList(ctx, types.ContainerListOptions{})
 	if err != nil {
@@ -90,7 +99,7 @@ func createExistingNamespaces(consoleDisplay bool) {
 		runtime.UnlockOSThread()
 		go listenOnLinkMessagesWithExisting(t, &targetNS, consoleDisplay)
 		go listenOnAddressMessages(t, &targetNS)
-
+		go listenOnRouteMessages(t, &targetNS)
 	}
 
 }
