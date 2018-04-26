@@ -2,13 +2,14 @@ package devices
 
 import (
 	"net"
+
 	"github.com/vishvananda/netlink"
 )
 
 type L2Event int
 
 const (
-	L2DeviceCreate         L2Event = iota
+	L2DeviceCreate L2Event = iota
 	L2DeviceDelete
 	L2DeviceUp
 	L2DeviceDown
@@ -41,12 +42,12 @@ func (e L2Event) String() string {
 type L2Status int
 
 const (
-	L2Down           L2Status = iota
+	L2Down L2Status = iota
 	L2Up
 	L2LowerLayerDown
 )
 
-var L2StatusStrings = [] string{
+var L2StatusStrings = []string{
 	"DOWN",
 	"UP",
 	"LOWERLAYERDOWN",
@@ -76,7 +77,7 @@ type L2Device struct {
 	deleteChannel    *chan bool
 	nameChannel      *chan string
 	dumpChannel      *chan bool
-	Event            string   `json:"event"`
+	Event            string `json:"event"`
 }
 
 func NewL2Device(update netlink.Link, t *Topology, namespace string, consoleDisplay bool) *L2Device {

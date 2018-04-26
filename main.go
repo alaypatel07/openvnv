@@ -1,19 +1,19 @@
 package main
 
 import (
+	"bufio"
+	"encoding/json"
+	"flag"
 	"fmt"
 	"github.com/alaypatel07/openvnv/devices"
-	"bufio"
+	"github.com/vishvananda/netns"
+	"io"
+	"net"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
-	"flag"
-	"net"
-	"io"
-	"github.com/vishvananda/netns"
-	"runtime"
 	"time"
-	"encoding/json"
 )
 
 var namespace *devices.Namespace
@@ -30,7 +30,19 @@ func getEncoder() *json.Encoder {
 	return encoder
 }
 
-func defaultNSCallback() (func(namespace *devices.Namespace, event devices.NSEvent)) {
+func defaultL3Callback() func(device *devices.L3Device, event devices.L3DeviceEvent) {
+	encoder = getEncoder()
+	return func(device *devices.L3Device, event devices.L3DeviceEvent) {
+		t := make(map[string]interface{})
+		t["event"] = event.String()
+		t["index"] = device.Index
+		t["namespace"] = device.Namespace
+		t["addresses"] = device.IP
+		encoder.Encode(t)
+	}
+}
+
+func defaultNSCallback() func(namespace *devices.Namespace, event devices.NSEvent) {
 	encoder := getEncoder()
 
 	getKeys := func(m map[string]string) []string {
@@ -97,8 +109,10 @@ func main() {
 		fmt.Println("Console Display Enabled")
 		n := defaultNSCallback()
 		v := defaultVethCallback()
+		d := defaultL3Callback()
 		devices.SubscribeAllNamespaceEvents(n)
 		devices.SubscribeAllVethEvents(v)
+		devices.SubscribeAllL3DeviceEvents(d)
 	}
 	createExistingNamespaces(*consoleDisplay)
 	go netnsTopoligy()
@@ -109,7 +123,7 @@ func netnsTopoligy() {
 	var netnsCreateChannel = make(chan string)
 	var netnsDestroyChannel = make(chan string)
 	var errChan = make(chan error)
-	go SubscribeDockerNetnsUpdate(&netnsCreateChannel, &netnsDestroyChannel, errChan);
+	go SubscribeDockerNetnsUpdate(&netnsCreateChannel, &netnsDestroyChannel, errChan)
 	for {
 		select {
 		case u := <-netnsCreateChannel:

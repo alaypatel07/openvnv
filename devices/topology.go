@@ -1,12 +1,13 @@
 package devices
 
 import (
-	"io"
-	"time"
-	"github.com/vishvananda/netns"
-	"fmt"
-	"sync"
 	"encoding/json"
+	"fmt"
+	"io"
+	"sync"
+	"time"
+
+	"github.com/vishvananda/netns"
 )
 
 type Topology struct {

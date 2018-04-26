@@ -2,6 +2,7 @@ package devices
 
 import (
 	"net"
+
 	"github.com/vishvananda/netlink"
 )
 
@@ -15,7 +16,7 @@ type L2BridgeEvent int
 const bridgeIota int = 8
 
 const (
-	L2BridgeCreate     L2BridgeEvent = iota + L2BridgeEvent(bridgeIota)
+	L2BridgeCreate L2BridgeEvent = iota + L2BridgeEvent(bridgeIota)
 	L2BridgeDelete
 	L2BridgeAddPort
 	L2BridgeRemovePort

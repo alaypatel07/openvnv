@@ -11,7 +11,7 @@ type LinkUpdateReceiver interface {
 
 type AddrUpdateReceiver interface {
 	ReceiveAddrUpdate()
-	L3EventChannel() chan interface{}
+	l3EventChannel() l3Channel
 }
 
 type LinkAddrUpdateReceiver interface {

@@ -1,24 +1,34 @@
 package main
 
 import (
-	"github.com/vishvananda/netlink"
 	"fmt"
+	"github.com/alaypatel07/openvnv/devices"
+	"github.com/vishvananda/netlink"
+	"github.com/vishvananda/netns"
 	"os"
 )
 
-func listenOnAddressMessages() {
+func listenOnAddressMessages(namespace *devices.Namespace, targetNs *netns.NsHandle) {
+
 	au := make(chan netlink.AddrUpdate)
 	done := make(chan struct{})
-	if err := netlink.AddrSubscribe(au, done); err != nil {
-		fmt.Errorf("Link Subscribe error", err)
+	if targetNs == nil {
+		if err := netlink.AddrSubscribe(au, done); err != nil {
+			fmt.Errorf("Link Subscribe error", err)
+		}
+	} else {
+		if err := netlink.AddrSubscribeAt(*targetNs, au, done); err != nil {
+			fmt.Errorf("Link Subscribe error", err)
+		}
 	}
+
 	for {
 		select {
 		case update := <-au:
 			if update.NewAddr {
-				addAddress(update)
+				namespace.AddL3Addr(update.LinkIndex, &update.LinkAddress)
 			} else {
-				deleteAddress(update)
+				namespace.RemoveL3Addr(update.LinkIndex, &update.LinkAddress)
 			}
 
 		case d := <-done:
@@ -26,12 +36,4 @@ func listenOnAddressMessages() {
 			os.Exit(1)
 		}
 	}
-}
-func deleteAddress(update netlink.AddrUpdate) {
-	fmt.Print("Address deleted ")
-	fmt.Printf("%+v\n", update)
-}
-func addAddress(update netlink.AddrUpdate) {
-	fmt.Print("Address added ")
-	fmt.Printf("%+v\n", update)
 }

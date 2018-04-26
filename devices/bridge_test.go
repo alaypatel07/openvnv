@@ -2,6 +2,7 @@ package devices
 
 import (
 	"testing"
+
 	"github.com/vishvananda/netlink"
 )
 

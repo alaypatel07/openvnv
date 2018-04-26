@@ -2,15 +2,15 @@ package main
 
 import (
 	"context"
-	"github.com/docker/docker/client"
-	"github.com/docker/docker/api/types"
 	"fmt"
-	"github.com/docker/docker/api/types/filters"
-	"github.com/vishvananda/netns"
-	"github.com/vishvananda/netlink"
-	"sort"
 	"github.com/alaypatel07/openvnv/devices"
+	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/filters"
+	"github.com/docker/docker/client"
+	"github.com/vishvananda/netlink"
+	"github.com/vishvananda/netns"
 	"runtime"
+	"sort"
 )
 
 var nameLimit = 10
@@ -26,8 +26,13 @@ func createDevices(namespace *devices.Namespace, consoleDisplay bool) {
 	}
 	sort.Sort(byBridge(links))
 
-	for _, value := range links {
-		namespace.AddL2Device(value, consoleDisplay)
+	for _, link := range links {
+		namespace.AddL2Device(link, consoleDisplay)
+		addrs, err := netlink.AddrList(link, netlink.FAMILY_ALL)
+		if err != nil {
+			fmt.Println("Error in getting addresses", err)
+		}
+		namespace.AddL3Device(link.Attrs().Index, addrs, consoleDisplay)
 	}
 	if consoleDisplay {
 		fmt.Println("Processing devices in namespace, ", namespace.Name, "...Done")
@@ -47,6 +52,7 @@ func createExistingNamespaces(consoleDisplay bool) {
 	createDevices(namespace, consoleDisplay)
 
 	go listenOnLinkMessagesWithExisting(namespace, nil, consoleDisplay)
+	go listenOnAddressMessages(namespace, nil)
 
 	containerList, err := cli.ContainerList(ctx, types.ContainerListOptions{})
 	if err != nil {
@@ -83,6 +89,7 @@ func createExistingNamespaces(consoleDisplay bool) {
 
 		runtime.UnlockOSThread()
 		go listenOnLinkMessagesWithExisting(t, &targetNS, consoleDisplay)
+		go listenOnAddressMessages(t, &targetNS)
 
 	}
 

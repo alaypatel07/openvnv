@@ -1,8 +1,9 @@
 package devices
 
 import (
-	"github.com/vishvananda/netlink"
 	"net"
+
+	"github.com/vishvananda/netlink"
 )
 
 type l2DeviceFlagsEvent struct {

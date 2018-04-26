@@ -1,16 +1,17 @@
 package devices
 
 import (
-	"github.com/vishvananda/netlink"
+	"errors"
 	"fmt"
 	"runtime"
-	"github.com/vishvananda/netns"
 	"time"
-	"errors"
+
+	"github.com/vishvananda/netlink"
+	"github.com/vishvananda/netns"
 )
 
 const (
-	VethPair    = iota
+	VethPair = iota
 	VethUnknown
 	VethDelete
 )

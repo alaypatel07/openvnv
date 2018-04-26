@@ -1,17 +1,18 @@
 package devices
 
 import (
-	"github.com/vishvananda/netlink"
+	"errors"
 	"fmt"
 	"net"
-	"errors"
+
+	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
 )
 
 type NSEvent int
 
 const (
-	NSCreate     NSEvent = iota
+	NSCreate NSEvent = iota
 	NSDelete
 	NSTypeChange
 	NSConnect
@@ -120,11 +121,37 @@ func (n *Namespace) AddL2Device(update netlink.Link, consoleDisplay bool) {
 	}
 }
 
-func (n *Namespace) AddL3Device(index int, receiver LinkAddrUpdateReceiver) {
-	n.L3Devices[index] = receiver
+func (n *Namespace) AddL3Device(index int, addrs []netlink.Addr, consoleDisplay bool) {
+	ipAddrs := make([]*net.IPNet, 0)
+	for _, a := range addrs {
+		ipAddrs = append(ipAddrs, a.IPNet)
+	}
+	if d, ok := n.L2Devices[index]; ok {
+		l3dev := NewL3Device(index, n.Name, d, ipAddrs, consoleDisplay)
+		n.L3Devices[index] = l3dev
+		n.SetType("network")
+	}
+}
+
+func (n *Namespace) AddL3Addr(index int, addr *net.IPNet) {
+	if d, ok := n.L3Devices[index]; ok {
+		*d.l3EventChannel().addAddrChannel <- addr
+		n.SetType("network")
+	}
+}
+
+func (n *Namespace) RemoveL3Addr(index int, addr *net.IPNet) {
+	if d, ok := n.L3Devices[index]; ok {
+		*d.l3EventChannel().removeAddrChannel <- addr
+	}
 }
 
 func (n *Namespace) RemoveDevice(index int) {
+	if dev, ok := n.L3Devices[index]; ok {
+		*dev.l3EventChannel().doneChannel <- true
+		<-*dev.l3EventChannel().doneChannel
+		delete(n.L3Devices, index)
+	}
 	if dev, ok := n.L2Devices[index]; ok {
 		if d, ok := dev.(*L2Device); ok {
 			d.DeleteDevice()
@@ -134,9 +161,6 @@ func (n *Namespace) RemoveDevice(index int) {
 			d.DeleteDevice()
 		}
 		delete(n.L2Devices, index)
-	}
-	if _, ok := n.L3Devices[index]; ok {
-		delete(n.L3Devices, index)
 	}
 }
 
@@ -179,15 +203,25 @@ func (n *Namespace) Dump(index int) {
 	if d, ok := n.L2Devices[index]; ok {
 		*d.l2EventChannel().dump <- true
 		<-*d.l2EventChannel().dump
+		if l3d, ok := n.L3Devices[index]; ok {
+			*l3d.l3EventChannel().dumpChannel <- true
+			<-*l3d.l3EventChannel().dumpChannel
+		}
 	} else {
 		fmt.Println("No device with the index")
 	}
 }
 
 func (n *Namespace) DumpAll() {
-	for _, value := range n.L2Devices {
-		*value.l2EventChannel().dump <- true
-		_ = <-*value.l2EventChannel().dump
+	for _, value := range n.L3Devices {
+		*value.l3EventChannel().dumpChannel <- true
+		_ = <-*value.l3EventChannel().dumpChannel
+	}
+	for index, _ := range n.L2Devices {
+		if dev, ok := n.L2Devices[index]; !ok {
+			*dev.l2EventChannel().dump <- true
+			<-*dev.l2EventChannel().dump
+		}
 	}
 }
 
