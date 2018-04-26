@@ -6,6 +6,7 @@ import (
 	"github.com/vishvananda/netns"
 	"fmt"
 	"sync"
+	"encoding/json"
 )
 
 type Topology struct {
@@ -26,10 +27,10 @@ func (t *Topology) GetNamespaces() map[string]*Namespace {
 	return t.Namespaces
 }
 
-var dumper io.Writer
+var dumper *json.Encoder
 
 func SetWriter(w io.Writer) {
-	dumper = w
+	dumper = json.NewEncoder(w)
 	return
 }
 
@@ -75,6 +76,7 @@ func (t *Topology) DeleteNamespace(namespace string) {
 func (t *Topology) AddToBuffer(event PeerEvent) {
 	t.Lock()
 	t.buffer[event.GetIndex()] = event
+	event.fireChangeEvents(VethUnknown)
 	t.Unlock()
 }
 
@@ -107,7 +109,6 @@ func (t *Topology) RemoveFromBuffer(index string) {
 func (t *Topology) Connect(ns1, ns2 string) {
 	t.Get(ns1).Connect(ns2)
 	t.Get(ns2).Connect(ns1)
-	fmt.Println("NS:", ns1[:7], "and NS:", ns2[:7], "connected")
 }
 
 func (t *Topology) Disconnect(ns1, ns2 string) {
@@ -119,5 +120,4 @@ func (t *Topology) Disconnect(ns1, ns2 string) {
 	if n2 != nil {
 		n2.Disconnect(ns1)
 	}
-	fmt.Println("NS:", ns1[:7], "and NS:", ns2[:7], "disconnected")
 }

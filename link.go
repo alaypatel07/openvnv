@@ -25,9 +25,9 @@ func (s byBridge) Less(i, j int) bool {
 	return s[i].Type() == "bridge"
 }
 
-func createNamespaceDeleteCallback() (func(namespace devices.Namespace, event devices.NSEvent), *chan bool) {
+func createNamespaceDeleteCallback() (func(namespace *devices.Namespace, event devices.NSEvent), *chan bool) {
 	doneChannel := make(chan bool)
-	callback := func(namespace devices.Namespace, event devices.NSEvent) {
+	callback := func(namespace *devices.Namespace, event devices.NSEvent) {
 		doneChannel <- true
 	}
 	return callback, &doneChannel
@@ -48,7 +48,6 @@ func listenOnLinkMessagesWithExisting(namespace *devices.Namespace, targetNS *ne
 
 	callback, doneChannel := createNamespaceDeleteCallback()
 	namespace.OnChange(devices.NSDelete, callback)
-
 
 	lu := make(chan netlink.LinkUpdate)
 	options := netlink.LinkSubscribeOptions{
@@ -86,7 +85,7 @@ func listenOnLinkMessagesWithExisting(namespace *devices.Namespace, targetNS *ne
 					namespace.RemoveMaster(int(update.Attrs().Index), int(update.Attrs().MasterIndex))
 				}
 			}
-		case u := <- *doneChannel:
+		case u := <-*doneChannel:
 			if u {
 				return
 			}

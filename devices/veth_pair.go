@@ -11,10 +11,10 @@ const (
 
 type PeerEvent struct {
 	*Veth
-	Event		  VethPairEvent
+	Event VethPairEvent
 }
 
-func NewPeerEvent (v *Veth, event VethPairEvent) PeerEvent {
+func NewPeerEvent(v *Veth, event VethPairEvent) PeerEvent {
 	return PeerEvent{
 		v,
 		event,

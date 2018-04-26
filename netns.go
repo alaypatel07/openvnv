@@ -13,8 +13,10 @@ import (
 	"runtime"
 )
 
+var nameLimit = 10
+
 func createDevices(namespace *devices.Namespace, consoleDisplay bool) {
-	if consoleDisplay{
+	if consoleDisplay {
 		fmt.Println("Processing devices in namespace, ", namespace.Name)
 	}
 	links, err := netlink.LinkList()
@@ -27,7 +29,7 @@ func createDevices(namespace *devices.Namespace, consoleDisplay bool) {
 	for _, value := range links {
 		namespace.AddL2Device(value, consoleDisplay)
 	}
-	if consoleDisplay{
+	if consoleDisplay {
 		fmt.Println("Processing devices in namespace, ", namespace.Name, "...Done")
 	}
 }
@@ -52,8 +54,6 @@ func createExistingNamespaces(consoleDisplay bool) {
 		return
 	}
 
-
-
 	for _, container := range containerList {
 		runtime.LockOSThread()
 
@@ -63,7 +63,7 @@ func createExistingNamespaces(consoleDisplay bool) {
 			return
 		}
 
-		targetNS, err := netns.GetFromDocker(container.ID)
+		targetNS, err := netns.GetFromDocker(container.ID[:nameLimit])
 		if err != nil {
 			fmt.Println("ERROR: GETTING DOCKER NS: ", err, namespace)
 			return
@@ -73,7 +73,7 @@ func createExistingNamespaces(consoleDisplay bool) {
 			fmt.Println("ERROR: SETTING GOROUTINE TO DOCKER NS: ", err, namespace)
 			return
 		}
-		t := topology.CreateNamespace(container.ID, &targetNS)
+		t := topology.CreateNamespace(container.ID[:nameLimit], &targetNS)
 		createDevices(t, consoleDisplay)
 		err = netns.Set(defaultNS)
 		if err != nil {
@@ -83,7 +83,6 @@ func createExistingNamespaces(consoleDisplay bool) {
 
 		runtime.UnlockOSThread()
 		go listenOnLinkMessagesWithExisting(t, &targetNS, consoleDisplay)
-
 
 	}
 
@@ -107,10 +106,10 @@ func SubscribeDockerNetnsUpdate(createUpdate *chan string, destroyUpdate *chan s
 		select {
 		case u := <-updateMessage:
 			if u.Type == "container" && u.Action == "start" {
-				*createUpdate <- u.ID
+				*createUpdate <- u.ID[:nameLimit]
 			}
 			if u.Type == "container" && u.Action == "destroy" {
-				*destroyUpdate <- u.ID
+				*destroyUpdate <- u.ID[:nameLimit]
 			}
 		case err := <-errC:
 			errChan <- err

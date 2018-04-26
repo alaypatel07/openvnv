@@ -3,8 +3,6 @@ package devices
 import (
 	"net"
 	"github.com/vishvananda/netlink"
-	"encoding/json"
-	"os"
 )
 
 type Bridge interface {
@@ -17,7 +15,7 @@ type L2BridgeEvent int
 const bridgeIota int = 8
 
 const (
-	L2BridgeCreate L2BridgeEvent = iota + L2BridgeEvent(bridgeIota)
+	L2BridgeCreate     L2BridgeEvent = iota + L2BridgeEvent(bridgeIota)
 	L2BridgeDelete
 	L2BridgeAddPort
 	L2BridgeRemovePort
@@ -32,7 +30,7 @@ var L2BridgeEventStrings = []string{
 
 func (e L2BridgeEvent) String() string {
 	for i, str := range L2BridgeEventStrings {
-		if i == int(e - L2BridgeEvent(bridgeIota)) {
+		if i == int(e-L2BridgeEvent(bridgeIota)) {
 			return str
 		}
 	}
@@ -44,6 +42,7 @@ type L2Bridge struct {
 	Ports         map[int]int
 	onchange      map[L2BridgeEvent][]func(dev L2Bridge, event L2BridgeEvent)
 	masterChannel *chan l2DeviceMasterEvent
+	BridgeEvent   string `json:"bridge_event"`
 }
 
 func (dev *L2Bridge) AddPort(devIndex int) {
@@ -60,12 +59,10 @@ func (dev *L2Bridge) RemovePort(devIndex int) {
 	}
 }
 
-func NewL2Bridge(update netlink.Link, t *Topology,namespace string,consoleDisplay bool) *L2Bridge {
+func NewL2Bridge(update netlink.Link, t *Topology, namespace string, consoleDisplay bool) *L2Bridge {
 	defaultFunction := func(dev L2Bridge, change L2BridgeEvent) {
-		t := make(map[string]interface{})
-		t["event"] = change.String()
-		t["data"] = dev
-		json.NewEncoder(os.Stdout).Encode(t)
+		dev.BridgeEvent = change.String()
+		dumper.Encode(dev)
 	}
 	onChange := make(map[L2BridgeEvent][]func(dev L2Bridge, change L2BridgeEvent))
 	if consoleDisplay {
@@ -82,13 +79,13 @@ func NewL2Bridge(update netlink.Link, t *Topology,namespace string,consoleDispla
 	return l2br
 }
 
-func (dev *L2Bridge) fireChangeEvents(change L2BridgeEvent)  {
-	for _, f := range dev.onchange[change - L2BridgeEvent(bridgeIota)] {
+func (dev *L2Bridge) fireChangeEvents(change L2BridgeEvent) {
+	for _, f := range dev.onchange[change-L2BridgeEvent(bridgeIota)] {
 		f(*dev, change)
 	}
 }
 
-func (dev *L2Bridge) CreateDevice(){
+func (dev *L2Bridge) CreateDevice() {
 	dev.fireChangeEvents(L2BridgeCreate)
 }
 
@@ -100,9 +97,9 @@ func (dev *L2Bridge) DeleteDevice() {
 func (dev *L2Bridge) ReceiveLinkUpdate() {
 	for {
 		select {
-		case m := <- *(dev.flagsChannel):
+		case m := <-*(dev.flagsChannel):
 			dev.SetFlags(m.flags, m.operState)
-		case m := <- *(dev.setMasterChannel):
+		case m := <-*(dev.setMasterChannel):
 			if m.masterIndex != 0 {
 				dev.AddPort(m.devIndex)
 			} else {
@@ -110,17 +107,14 @@ func (dev *L2Bridge) ReceiveLinkUpdate() {
 			}
 		case d := <-*(dev.dumpChannel):
 			if d {
-				if dumper != os.Stdout {
-					json.NewEncoder(dumper).Encode(dev)
-				}
-				json.NewEncoder(os.Stdout).Encode(dev)
+				dumper.Encode(dev)
 				*(dev.dumpChannel) <- true
 			}
 		case d := <-*(dev.deleteChannel):
 			if d {
 				return
 			}
-		case n := <- *(dev.nameChannel):
+		case n := <-*(dev.nameChannel):
 			dev.SetName(n)
 		}
 	}

@@ -1,6 +1,5 @@
 package main
 
-
 import (
 	"github.com/vishvananda/netlink"
 	"fmt"
@@ -15,14 +14,14 @@ func listenOnAddressMessages() {
 	}
 	for {
 		select {
-		case update := <- au:
+		case update := <-au:
 			if update.NewAddr {
 				addAddress(update)
 			} else {
 				deleteAddress(update)
 			}
 
-		case d := <- done:
+		case d := <-done:
 			fmt.Println("Done ", d)
 			os.Exit(1)
 		}
@@ -36,4 +35,3 @@ func addAddress(update netlink.AddrUpdate) {
 	fmt.Print("Address added ")
 	fmt.Printf("%+v\n", update)
 }
-

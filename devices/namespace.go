@@ -15,6 +15,7 @@ const (
 	NSDelete
 	NSTypeChange
 	NSConnect
+	NSDisconnect
 )
 
 var NSEventStrings = []string{
@@ -22,6 +23,7 @@ var NSEventStrings = []string{
 	"NSDelete",
 	"NSTypeChange",
 	"NSConnect",
+	"NSDisconnect",
 }
 
 func (e NSEvent) String() string {
@@ -33,10 +35,10 @@ func (e NSEvent) String() string {
 	return ""
 }
 
-var defaultSubscriber []func(Namespace, NSEvent)
+var defaultNsSubscriber []func(*Namespace, NSEvent)
 
-func SubscribeAllNamespaceEvents(callback func(Namespace, NSEvent)) {
-	defaultSubscriber = append(defaultSubscriber, callback)
+func SubscribeAllNamespaceEvents(callback func(*Namespace, NSEvent)) {
+	defaultNsSubscriber = append(defaultNsSubscriber, callback)
 }
 
 type Namespace struct {
@@ -45,13 +47,14 @@ type Namespace struct {
 	nsHandle       *netns.NsHandle
 	L2Devices      map[int]LinkUpdateReceiver
 	L3Devices      map[int]LinkAddrUpdateReceiver
-	Connections    map[string]Namespace
-	onchange       map[NSEvent][]func(namespace Namespace, change NSEvent)
+	Connections    map[string]string
+	onchange       map[NSEvent][]func(namespace *Namespace, change NSEvent)
 	topology       *Topology
 	peeringChannel *chan PeerEvent
+	Event          string `json:"event"`
 }
 
-func (n Namespace) OnChange(event NSEvent, callback func(Namespace, NSEvent)) error {
+func (n *Namespace) OnChange(event NSEvent, callback func(*Namespace, NSEvent)) error {
 	if int(event) >= len(NSEventStrings) || int(event) < 0 {
 		return errors.New("Namespace OnChange: NSEvent unrecognized")
 	}
@@ -65,14 +68,14 @@ func NewNamespace(name string, t *Topology, targetNs *netns.NsHandle) Namespace 
 		Name:           name,
 		L2Devices:      make(map[int]LinkUpdateReceiver),
 		L3Devices:      make(map[int]LinkAddrUpdateReceiver),
-		Connections:    make(map[string]Namespace),
+		Connections:    make(map[string]string),
 		nsHandle:       targetNs,
 		topology:       t,
-		onchange:       make(map[NSEvent][]func(Namespace, NSEvent)),
+		onchange:       make(map[NSEvent][]func(*Namespace, NSEvent)),
 		peeringChannel: &p,
 	}
 	for index, _ := range NSEventStrings {
-		for _, defaultCallback := range defaultSubscriber {
+		for _, defaultCallback := range defaultNsSubscriber {
 			if err := n.OnChange(NSEvent(index), defaultCallback); err != nil {
 				fmt.Println("ERROR: ASSIGNING ONCHANGE", err)
 			}
@@ -83,7 +86,7 @@ func NewNamespace(name string, t *Topology, targetNs *netns.NsHandle) Namespace 
 	return n
 }
 
-func (n Namespace) AddL2Device(update netlink.Link, consoleDisplay bool) {
+func (n *Namespace) AddL2Device(update netlink.Link, consoleDisplay bool) {
 	index := update.Attrs().Index
 	if _, ok := n.L2Devices[index]; ok {
 		fmt.Println("ADDL2DEVICE: Device", index, "Already Exist")
@@ -117,11 +120,11 @@ func (n Namespace) AddL2Device(update netlink.Link, consoleDisplay bool) {
 	}
 }
 
-func (n Namespace) AddL3Device(index int, receiver LinkAddrUpdateReceiver) {
+func (n *Namespace) AddL3Device(index int, receiver LinkAddrUpdateReceiver) {
 	n.L3Devices[index] = receiver
 }
 
-func (n Namespace) RemoveDevice(index int) {
+func (n *Namespace) RemoveDevice(index int) {
 	if dev, ok := n.L2Devices[index]; ok {
 		if d, ok := dev.(*L2Device); ok {
 			d.DeleteDevice()
@@ -137,7 +140,7 @@ func (n Namespace) RemoveDevice(index int) {
 	}
 }
 
-func (n Namespace) SetFlags(index int, f net.Flags, o netlink.LinkOperState) {
+func (n *Namespace) SetFlags(index int, f net.Flags, o netlink.LinkOperState) {
 	if d, ok := n.L2Devices[index]; ok {
 		e := newL2DeviceFlagsEvent(f, o)
 		*(d.l2EventChannel().flagsChannel) <- e
@@ -148,7 +151,7 @@ func (n Namespace) SetFlags(index int, f net.Flags, o netlink.LinkOperState) {
 	//}
 }
 
-func (n Namespace) SetMaster(devIndex int, masterIndex int) {
+func (n *Namespace) SetMaster(devIndex int, masterIndex int) {
 	if d, ok := n.L2Devices[devIndex]; ok {
 		if m, ok := n.L2Devices[masterIndex]; ok {
 			if masterIndex == 0 || masterIndex == d.l2EventChannel().master {
@@ -162,7 +165,7 @@ func (n Namespace) SetMaster(devIndex int, masterIndex int) {
 
 }
 
-func (n Namespace) RemoveMaster(devIndex int, masterIndex int) {
+func (n *Namespace) RemoveMaster(devIndex int, masterIndex int) {
 	if d, ok := n.L2Devices[devIndex]; ok {
 		if m, ok := n.L2Devices[masterIndex]; ok {
 			e := newL2DeviceMasterEvent(devIndex, 0)
@@ -172,27 +175,29 @@ func (n Namespace) RemoveMaster(devIndex int, masterIndex int) {
 	}
 }
 
-func (n Namespace) Dump(index int) {
+func (n *Namespace) Dump(index int) {
 	if d, ok := n.L2Devices[index]; ok {
 		*d.l2EventChannel().dump <- true
+		<-*d.l2EventChannel().dump
 	} else {
 		fmt.Println("No device with the index")
 	}
 }
 
-func (n Namespace) DumpAll() {
+func (n *Namespace) DumpAll() {
 	for _, value := range n.L2Devices {
 		*value.l2EventChannel().dump <- true
 		_ = <-*value.l2EventChannel().dump
 	}
 }
-func (n Namespace) fire(event NSEvent) {
+
+func (n *Namespace) fire(event NSEvent) {
 	for _, callback := range n.onchange[event] {
 		callback(n, event)
 	}
 }
 
-func (n Namespace) ChangeDeviceName(devIndex int, newName string) {
+func (n *Namespace) ChangeDeviceName(devIndex int, newName string) {
 	if d, ok := n.L2Devices[devIndex]; ok {
 		*d.l2EventChannel().nameChannel <- newName
 	}
@@ -205,7 +210,7 @@ func (n *Namespace) SendVPCreateEvent(event PeerEvent) {
 			//fmt.Println("create Got own event\n")
 			n.topology.RemoveFromBuffer(event.GetIndex())
 			n.topology.Connect(e.PeerNamespace, event.Namespace)
-			event.CopyPeer(e.Veth)
+			event.Pair(e.PeerIndex, e.PeerName, e.PeerNamespace)
 			n.topology.Get(e.PeerNamespace).SetVethPeer(e.PeerIndex, event.Veth)
 			return
 		}
@@ -214,8 +219,8 @@ func (n *Namespace) SendVPCreateEvent(event PeerEvent) {
 		if e.Event == VPCreate {
 			n.topology.RemoveFromBuffer(event.GetPeerIndex())
 			n.topology.Connect(event.Namespace, e.Namespace)
-			event.Pair(e.Veth)
-			e.Pair(event.Veth)
+			event.Pair(e.Index, e.Name, e.Namespace)
+			e.Pair(event.Index, event.Name, event.Namespace)
 			return
 		}
 	}
@@ -231,15 +236,16 @@ func (n *Namespace) SendVPDeleteEvent(event PeerEvent) {
 		//fmt.Println("Got own event\n")
 		if e.Event == VPCreate {
 			n.topology.RemoveFromBuffer(event.GetIndex())
-			n.topology.Connect(e.Namespace, event.PeerNamespace)
-			e.CopyPeer(event.Veth)
+			e.Pair(event.Index, event.Name, event.Namespace)
 			n.topology.Get(e.PeerNamespace).SetVethPeer(e.PeerIndex, e.Veth)
-
+			n.topology.Connect(e.Namespace, event.PeerNamespace)
 			return
 		}
 	} else if e, ok := n.topology.GetPeerEvent(event); ok {
 		//fmt.Println("Got peer event\n")
 		if e.Event == VPDelete {
+			e.fireChangeEvents(VethDelete)
+			event.fireChangeEvents(VethDelete)
 			n.topology.RemoveFromBuffer(event.GetPeerIndex())
 			n.topology.Disconnect(e.Namespace, event.Namespace)
 			return
@@ -248,34 +254,45 @@ func (n *Namespace) SendVPDeleteEvent(event PeerEvent) {
 	n.topology.AddToBuffer(event)
 }
 
-func (n Namespace) Connect(ns string) {
+func (n *Namespace) Connect(ns string) {
 	if nTemp, ok := n.Connections[ns]; ok {
-		if nTemp.Name == ns {
+		if nTemp == ns {
 			return
 		}
 	}
-	n.Connections[ns] = *n.topology.Get(ns)
+	n.Connections[ns] = (*n.topology.Get(ns)).Name
+	n.fire(NSConnect)
 	return
 }
 
-func (n Namespace) Disconnect(ns string) {
+func (n *Namespace) Disconnect(ns string) {
 	if nTemp, ok := n.Connections[ns]; ok {
-		if nTemp.Name == ns {
+		if nTemp == ns {
 			delete(n.Connections, ns)
 		}
 	}
+	n.fire(NSDisconnect)
 	return
 }
 
-func (n Namespace) SetVethPeer(dev int, peer *Veth)  {
+func (n *Namespace) GetVeth(dev int) *Veth {
 	if d, ok := n.L2Devices[dev]; ok {
-		v := d.(*Veth)
-		v.Pair(peer)
+		if v, ok := d.(*Veth); ok {
+			return v
+		}
+		return nil
+	}
+	return nil
+}
+
+func (n *Namespace) SetVethPeer(dev int, peer *Veth) {
+	if v := n.GetVeth(dev); v != nil {
+		v.Pair(peer.Index, peer.Name, peer.Namespace)
 	}
 	return
 }
 
-func (n Namespace) SetType(s string) {
+func (n *Namespace) SetType(s string) {
 	if n.Type == s {
 		return
 	}
@@ -283,6 +300,6 @@ func (n Namespace) SetType(s string) {
 	n.fire(NSTypeChange)
 }
 
-func (n Namespace) Delete() {
+func (n *Namespace) Delete() {
 	n.fire(NSDelete)
 }

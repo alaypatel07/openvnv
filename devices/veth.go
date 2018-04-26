@@ -2,35 +2,68 @@ package devices
 
 import (
 	"github.com/vishvananda/netlink"
-	"os"
-	"encoding/json"
 	"fmt"
 	"runtime"
 	"github.com/vishvananda/netns"
 	"time"
+	"errors"
 )
+
+const (
+	VethPair    = iota
+	VethUnknown
+	VethDelete
+)
+
+var VethEventStrings = []string{
+	"VethPair",
+	"VethUnknown",
+	"VethDelete",
+}
+
+type VethEvent int
+
+func (e VethEvent) String() string {
+	for i, str := range VethEventStrings {
+		if i == int(e) {
+			return str
+		}
+	}
+	return ""
+}
 
 type Veth struct {
 	*L2Device
 	PeerName      string
 	PeerIndex     int
 	PeerNamespace string
+	onChange      map[VethEvent][]func(*Veth, VethEvent)
 }
 
-func NewVeth(update netlink.Link, t *Topology,namespace string, consoleDisplay bool) (*Veth, error) {
+var defaultVethSubscriber []func(*Veth, VethEvent)
+
+func SubscribeAllVethEvents(callback func(*Veth, VethEvent)) {
+	defaultVethSubscriber = append(defaultVethSubscriber, callback)
+}
+
+func NewVeth(update netlink.Link, t *Topology, namespace string, consoleDisplay bool) (*Veth, error) {
 	l2dev := NewL2Device(update, t, namespace, consoleDisplay)
 	v := &Veth{
-		l2dev,
-		"",
-		-1,
-		"",
+		L2Device:  l2dev,
+		PeerIndex: -1,
+		onChange:  make(map[VethEvent][]func(veth *Veth, event VethEvent)),
+	}
+	for index, _ := range VethEventStrings {
+		for _, defaultCallback := range defaultVethSubscriber {
+			if err := v.OnChange(VethEvent(index), defaultCallback); err != nil {
+				fmt.Println("ERROR: ASSIGNING ONCHANGE", err)
+			}
+		}
 	}
 	func() {
 		//<- time.After(100 * time.Millisecond)
 		if peer, ok := v.isPeerVisible(); ok {
-			v.PeerName = peer.Name
-			v.PeerIndex = peer.Index
-			v.PeerNamespace = v.Namespace
+			v.Pair(peer.Index, peer.Name, v.Namespace)
 		} else {
 			//fmt.Println(v.Index, v.PeerIndex, v.Namespace, "VETH CREATE")
 			v.raiseCreateEvent()
@@ -39,17 +72,16 @@ func NewVeth(update netlink.Link, t *Topology,namespace string, consoleDisplay b
 	return v, nil
 }
 
-func (v *Veth) Pair(peer *Veth) {
-	fmt.Println("Pairing", v.Name, v.Namespace[:7], "with", peer.Name, peer.Namespace[:7])
-	v.PeerNamespace = peer.Namespace
-	v.PeerName = peer.Name
-	v.PeerIndex = peer.Index
+func (v *Veth) Pair(peerIndex int, peerName, peerNamespace string) {
+	//fmt.Println("Pairing", v.Name, v.Namespace[:7], "with", peer.Name, peer.Namespace[:7])
+	v.PeerNamespace = peerNamespace
+	v.PeerName = peerName
+	v.PeerIndex = peerIndex
+	v.fireChangeEvents(VethPair)
 }
 
-func (v *Veth) CopyPeer(peer *Veth) {
-	v.PeerNamespace = peer.PeerNamespace
-	v.PeerName = peer.PeerName
-	v.PeerIndex = peer.PeerIndex
+func (v *Veth) Unknown() {
+	v.fireChangeEvents(VethUnknown)
 }
 
 func (v *Veth) raiseCreateEvent() {
@@ -67,7 +99,7 @@ func (v *Veth) isPeerVisible() (*netlink.Veth, bool) {
 	//<- time.After(50 * time.Millisecond)
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
-	err :=  netns.Set(*v.topology.Get(v.Namespace).nsHandle)
+	err := netns.Set(*v.topology.Get(v.Namespace).nsHandle)
 	if err != nil {
 		fmt.Println("ERROR: SETTING NS TO ", v.Namespace, err)
 		return nil, false
@@ -96,7 +128,6 @@ func (v *Veth) isPeerVisible() (*netlink.Veth, bool) {
 	return p.(*netlink.Veth), true
 }
 
-
 func (v *Veth) ReceiveLinkUpdate() {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
@@ -113,17 +144,14 @@ func (v *Veth) ReceiveLinkUpdate() {
 			}
 		case d := <-*(v.dumpChannel):
 			if d {
-				if dumper != os.Stdout {
-					json.NewEncoder(dumper).Encode(v)
-				}
-				json.NewEncoder(os.Stdout).Encode(v)
+				dumper.Encode(v)
 				*(v.dumpChannel) <- true
 			}
 		case d := <-*(v.deleteChannel):
 			if d {
 				return
 			}
-		case n := <- *(v.nameChannel):
+		case n := <-*(v.nameChannel):
 			v.SetName(n)
 
 		}
@@ -132,8 +160,7 @@ func (v *Veth) ReceiveLinkUpdate() {
 
 func (v *Veth) DeleteDevice() {
 	//fmt.Println("Delete VETH")
-	*v.deleteChannel <- true
-	v.fireChangeEvents(L2DeviceDelete)
+	v.L2Device.DeleteDevice()
 	//fmt.Println("Index:", v.Index, " Peer Index:", v.PeerIndex, "Namespace:", v.Namespace, "Peer Namespace:, ", v.PeerNamespace, "VETH DELETE")
 	v.raiseDeleteEvent()
 }
@@ -147,4 +174,15 @@ func (v *Veth) SetName(s string) {
 func (v *Veth) SetPeerIndex(i int) {
 	v.PeerIndex = i
 }
-
+func (v *Veth) OnChange(event VethEvent, callback func(*Veth, VethEvent)) error {
+	if int(event) >= len(VethEventStrings) || int(event) < 0 {
+		return errors.New("Veth OnChange: VethEvent unrecognized")
+	}
+	v.onChange[event] = append(v.onChange[event], callback)
+	return nil
+}
+func (v *Veth) fireChangeEvents(event VethEvent) {
+	for _, f := range v.onChange[event] {
+		f(v, event)
+	}
+}

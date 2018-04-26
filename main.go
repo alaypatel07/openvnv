@@ -12,6 +12,7 @@ import (
 	"io"
 	"github.com/vishvananda/netns"
 	"runtime"
+	"time"
 	"encoding/json"
 )
 
@@ -20,25 +21,65 @@ var topology = devices.NewTopology()
 var consoleDisplay *bool
 
 var dumpIP *string
+var encoder *json.Encoder
+
+func getEncoder() *json.Encoder {
+	if encoder == nil {
+		encoder = json.NewEncoder(os.Stdout)
+	}
+	return encoder
+}
+
+func defaultNSCallback() (func(namespace *devices.Namespace, event devices.NSEvent)) {
+	encoder := getEncoder()
+
+	getKeys := func(m map[string]string) []string {
+		keys := make([]string, 0, len(m))
+		for k := range m {
+			keys = append(keys, k)
+		}
+		return keys
+	}
+
+	return func(namespace *devices.Namespace, change devices.NSEvent) {
+		t := make(map[string]interface{})
+		t["event"] = change.String()
+		t["name"] = namespace.Name
+		switch change {
+		case devices.NSTypeChange:
+			t["type"] = namespace.Type
+		case devices.NSConnect:
+			t["connections"] = getKeys(namespace.Connections)
+		case devices.NSDisconnect:
+			t["connections"] = getKeys(namespace.Connections)
+		}
+		encoder.Encode(t)
+	}
+}
+
+func defaultVethCallback() func(veth *devices.Veth, events devices.VethEvent) {
+	encoder := getEncoder()
+	return func(veth *devices.Veth, event devices.VethEvent) {
+		t := make(map[string]interface{})
+		t["event"] = event.String()
+		t["name"] = veth.Name
+		t["namespace"] = veth.Namespace
+		t["index"] = veth.Index
+		switch event {
+		case devices.VethPair:
+			t["peerName"] = veth.PeerName
+			t["peerNamespace"] = veth.PeerNamespace
+			t["peerIndex"] = veth.PeerIndex
+		}
+		encoder.Encode(t)
+	}
+}
 
 func main() {
 	fmt.Println("Hello OpenVNV")
 	consoleDisplay = flag.Bool("events", false, "Use -events to display events on console")
 	dumpIP = flag.String("ip", "empty", "Use -ip=<ip>:<port> to send events to remote tcp connection")
 	flag.Parse()
-	if *consoleDisplay {
-		fmt.Println("Console Display Enabled")
-		defaultNSCallback := func(namespace devices.Namespace, change devices.NSEvent) {
-			//fmt.Println("Namespace:", namespace.Name, "Event", int(change), "occured which means", change)
-			t := make(map[string]interface{})
-			t["event"] = change.String()
-			t["data"] = namespace
-			json.NewEncoder(os.Stdout).Encode(t)
-		}
-		devices.SubscribeAllNamespaceEvents(defaultNSCallback)
-	}
-	createExistingNamespaces(*consoleDisplay)
-	go netnsTopoligy()
 	var sock io.Writer
 	if *dumpIP != "empty" {
 		var err error
@@ -51,6 +92,16 @@ func main() {
 		sock = os.Stdout
 	}
 	devices.SetWriter(sock)
+
+	if *consoleDisplay {
+		fmt.Println("Console Display Enabled")
+		n := defaultNSCallback()
+		v := defaultVethCallback()
+		devices.SubscribeAllNamespaceEvents(n)
+		devices.SubscribeAllVethEvents(v)
+	}
+	createExistingNamespaces(*consoleDisplay)
+	go netnsTopoligy()
 	dumpTopology()
 }
 
@@ -62,10 +113,11 @@ func netnsTopoligy() {
 	for {
 		select {
 		case u := <-netnsCreateChannel:
+			fmt.Println("GOT:", u)
 			processNewNamespace(u, *consoleDisplay)
-		case u := <- netnsDestroyChannel:
+		case u := <-netnsDestroyChannel:
 			topology.DeleteNamespace(u)
-		case err := <- errChan:
+		case err := <-errChan:
 			fmt.Println("ERROR: SUBSCRIBEDOCKERUPDATE", err)
 		}
 	}
@@ -115,6 +167,7 @@ func dumpTopology() {
 		}
 		if text == "bye" {
 			for ns, _ := range topology.Namespaces {
+				time.After(5 * time.Second)
 				topology.DeleteNamespace(ns)
 			}
 			os.Exit(0)
@@ -133,4 +186,3 @@ func dumpTopology() {
 		}
 	}
 }
-

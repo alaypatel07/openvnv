@@ -3,8 +3,6 @@ package devices
 import (
 	"net"
 	"github.com/vishvananda/netlink"
-	"encoding/json"
-	"os"
 )
 
 type L2Event int
@@ -78,14 +76,13 @@ type L2Device struct {
 	deleteChannel    *chan bool
 	nameChannel      *chan string
 	dumpChannel      *chan bool
+	Event            string   `json:"event"`
 }
 
 func NewL2Device(update netlink.Link, t *Topology, namespace string, consoleDisplay bool) *L2Device {
 	defaultFunction := func(dev L2Device, change L2Event) {
-		t := make(map[string]interface{})
-		t["event"] = change.String()
-		t["data"] = dev
-		json.NewEncoder(os.Stdout).Encode(t)
+		dev.Event = change.String()
+		dumper.Encode(dev)
 	}
 	onChange := make(map[L2Event][]func(dev L2Device, change L2Event))
 	if consoleDisplay {
@@ -93,12 +90,6 @@ func NewL2Device(update netlink.Link, t *Topology, namespace string, consoleDisp
 			onChange[L2Event(i)] = append(onChange[L2Event(i)], defaultFunction)
 		}
 	}
-
-	//link, err := netlink.LinkByIndex(update.Attrs().Index)
-	//if err != nil {
-	//	fmt.Println("ERROR: GETTING L2 LINK", err, update.Attrs().Name, update.Attrs().Index)
-	//	return nil
-	//}
 
 	l := make(chan l2DeviceFlagsEvent)
 	m := make(chan l2DeviceMasterEvent)
@@ -204,17 +195,14 @@ func (dev *L2Device) ReceiveLinkUpdate() {
 			}
 		case d := <-*(dev.dumpChannel):
 			if d {
-				if dumper != os.Stdout {
-					json.NewEncoder(dumper).Encode(dev)
-				}
-				json.NewEncoder(os.Stdout).Encode(dev)
+				dumper.Encode(dev)
 				*(dev.dumpChannel) <- true
 			}
 		case d := <-*(dev.deleteChannel):
 			if d {
 				return
 			}
-		case n := <- *(dev.nameChannel):
+		case n := <-*(dev.nameChannel):
 			dev.SetName(n)
 		}
 	}
