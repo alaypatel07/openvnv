@@ -6,12 +6,12 @@ import (
 
 type LinkUpdateReceiver interface {
 	ReceiveLinkUpdate()
-	l2EventChannel() l2Channel
+	L2EventChannel() L2channel
 }
 
 type AddrUpdateReceiver interface {
 	ReceiveAddrUpdate()
-	l3EventChannel() l3Channel
+	L3EventChannel() L3Channel
 }
 
 type LinkAddrUpdateReceiver interface {

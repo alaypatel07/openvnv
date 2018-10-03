@@ -67,7 +67,7 @@ type L2Device struct {
 	Name             string   `json:"name"`
 	Index            int      `json:"index"`
 	Status           L2Status `json:"status"`
-	Master           int      `json:"master"`
+	Master           int      `json:"Master"`
 	Namespace        string   `json:"namespace"`
 	flags            net.Flags
 	operState        netlink.LinkOperState
@@ -83,7 +83,20 @@ type L2Device struct {
 func NewL2Device(update netlink.Link, t *Topology, namespace string, consoleDisplay bool) *L2Device {
 	defaultFunction := func(dev L2Device, change L2Event) {
 		dev.Event = change.String()
-		dumper.Encode(dev)
+		t := make(map[string]interface{})
+		t["name"] = dev.Index
+		t["indexName"] = "device1"
+		t["ns"] = dev.Namespace
+		t["connections"] = dev.Master
+		switch change {
+		case L2DeviceCreate:
+			t["event"] = "create"
+		case L2DeviceDelete:
+			t["event"] = "delete"
+		default:
+			t["event"] = "update"
+		}
+		dumper.Encode(t)
 	}
 	onChange := make(map[L2Event][]func(dev L2Device, change L2Event))
 	if consoleDisplay {
@@ -116,7 +129,7 @@ func NewL2Device(update netlink.Link, t *Topology, namespace string, consoleDisp
 	return &l2dev
 }
 
-func (dev *L2Device) l2EventChannel() l2Channel {
+func (dev *L2Device) L2EventChannel() L2channel {
 	return newL2Channel(dev.Master, dev.setMasterChannel, dev.flagsChannel, dev.nameChannel, dev.dumpChannel)
 }
 

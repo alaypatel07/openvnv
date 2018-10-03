@@ -64,7 +64,11 @@ func NewVeth(update netlink.Link, t *Topology, namespace string, consoleDisplay 
 	func() {
 		//<- time.After(100 * time.Millisecond)
 		if peer, ok := v.isPeerVisible(); ok {
-			v.Pair(peer.Index, peer.Name, v.Namespace)
+			v.PeerNamespace = v.Namespace
+			v.PeerName = peer.Name
+			v.PeerIndex = peer.Index
+			v.raiseCreateEvent()
+			//v.Pair(peer.Index, peer.Name, v.Namespace)
 		} else {
 			//fmt.Println(v.Index, v.PeerIndex, v.Namespace, "VETH CREATE")
 			v.raiseCreateEvent()

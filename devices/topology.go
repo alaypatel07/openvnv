@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"strings"
+
 	"github.com/vishvananda/netns"
 )
 
@@ -33,6 +35,10 @@ var dumper *json.Encoder
 func SetWriter(w io.Writer) {
 	dumper = json.NewEncoder(w)
 	return
+}
+
+func GetEncoder() *json.Encoder {
+	return dumper
 }
 
 func (t *Topology) GetDefaultNamespace() *Namespace {
@@ -107,18 +113,25 @@ func (t *Topology) RemoveFromBuffer(index string) {
 	t.Unlock()
 }
 
-func (t *Topology) Connect(ns1, ns2 string) {
-	t.Get(ns1).Connect(ns2)
-	t.Get(ns2).Connect(ns1)
+func (t *Topology) Connect(ns1Index, ns2Index string) {
+	ns1 := strings.Split(ns1Index, ":")
+	ns2 := strings.Split(ns2Index, ":")
+	t.Get(ns1[0]).Connect(ns2Index)
+	t.Get(ns2[0]).Connect(ns1Index)
+	//fmt.Printf("\n\nPeer Connect %+v %+v\n", ns1, ns2)
 }
 
-func (t *Topology) Disconnect(ns1, ns2 string) {
-	n1 := t.Get(ns1)
-	n2 := t.Get(ns2)
+func (t *Topology) Disconnect(ns1Index, ns2Index string) {
+
+	ns1 := strings.Split(ns1Index, ":")
+	ns2 := strings.Split(ns2Index, ":")
+	n1 := t.Get(ns1[0])
+	n2 := t.Get(ns2[0])
 	if n1 != nil {
-		n1.Disconnect(ns2)
+		n1.Disconnect(ns2Index)
 	}
 	if n2 != nil {
-		n2.Disconnect(ns1)
+		n2.Disconnect(ns1Index)
 	}
+	//fmt.Printf("\n\nPeer Disconnect %+v %+v\n", ns1, ns2)
 }

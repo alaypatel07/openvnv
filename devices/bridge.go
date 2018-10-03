@@ -62,8 +62,28 @@ func (dev *L2Bridge) RemovePort(devIndex int) {
 
 func NewL2Bridge(update netlink.Link, t *Topology, namespace string, consoleDisplay bool) *L2Bridge {
 	defaultFunction := func(dev L2Bridge, change L2BridgeEvent) {
+		getKeys := func(m map[int]int) []int {
+			t := make([]int, 0)
+			for _, value := range m {
+				t = append(t, value)
+			}
+			return t
+		}
 		dev.BridgeEvent = change.String()
-		dumper.Encode(dev)
+		t := make(map[string]interface{})
+		t["name"] = dev.Index
+		t["indexName"] = "device1"
+		t["ns"] = dev.Namespace
+		t["connections"] = getKeys(dev.Ports)
+		switch change {
+		case L2BridgeCreate:
+			t["event"] = "create"
+		case L2BridgeDelete:
+			t["event"] = "delete"
+		default:
+			t["event"] = "update"
+		}
+		dumper.Encode(t)
 	}
 	onChange := make(map[L2BridgeEvent][]func(dev L2Bridge, change L2BridgeEvent))
 	if consoleDisplay {

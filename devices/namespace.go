@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net"
 
+	"strconv"
+
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
 )
@@ -142,21 +144,21 @@ func (n *Namespace) AddL3Device(index int, addrs []netlink.Addr, consoleDisplay 
 
 func (n *Namespace) AddL3Addr(index int, addr *net.IPNet) {
 	if d, ok := n.L3Devices[index]; ok {
-		*d.l3EventChannel().addAddrChannel <- addr
+		*d.L3EventChannel().addAddrChannel <- addr
 		n.SetType("network")
 	}
 }
 
 func (n *Namespace) RemoveL3Addr(index int, addr *net.IPNet) {
 	if d, ok := n.L3Devices[index]; ok {
-		*d.l3EventChannel().removeAddrChannel <- addr
+		*d.L3EventChannel().removeAddrChannel <- addr
 	}
 }
 
 func (n *Namespace) RemoveDevice(index int) {
 	if dev, ok := n.L3Devices[index]; ok {
-		*dev.l3EventChannel().doneChannel <- true
-		<-*dev.l3EventChannel().doneChannel
+		*dev.L3EventChannel().doneChannel <- true
+		<-*dev.L3EventChannel().doneChannel
 		delete(n.L3Devices, index)
 	}
 	if dev, ok := n.L2Devices[index]; ok {
@@ -174,7 +176,7 @@ func (n *Namespace) RemoveDevice(index int) {
 func (n *Namespace) SetFlags(index int, f net.Flags, o netlink.LinkOperState) {
 	if d, ok := n.L2Devices[index]; ok {
 		e := newL2DeviceFlagsEvent(f, o)
-		*(d.l2EventChannel().flagsChannel) <- e
+		*(d.L2EventChannel().flagsChannel) <- e
 
 	}
 	//TODO
@@ -185,12 +187,12 @@ func (n *Namespace) SetFlags(index int, f net.Flags, o netlink.LinkOperState) {
 func (n *Namespace) SetMaster(devIndex int, masterIndex int) {
 	if d, ok := n.L2Devices[devIndex]; ok {
 		if m, ok := n.L2Devices[masterIndex]; ok {
-			if masterIndex == 0 || masterIndex == d.l2EventChannel().master {
+			if masterIndex == 0 || masterIndex == d.L2EventChannel().Master {
 				return
 			}
 			e := newL2DeviceMasterEvent(devIndex, masterIndex)
-			*(d.l2EventChannel().masterChannel) <- e
-			*(m.l2EventChannel()).masterChannel <- e
+			*(d.L2EventChannel().masterChannel) <- e
+			*(m.L2EventChannel()).masterChannel <- e
 		}
 	}
 
@@ -200,19 +202,19 @@ func (n *Namespace) RemoveMaster(devIndex int, masterIndex int) {
 	if d, ok := n.L2Devices[devIndex]; ok {
 		if m, ok := n.L2Devices[masterIndex]; ok {
 			e := newL2DeviceMasterEvent(devIndex, 0)
-			*(d.l2EventChannel().masterChannel) <- e
-			*(m.l2EventChannel()).masterChannel <- e
+			*(d.L2EventChannel().masterChannel) <- e
+			*(m.L2EventChannel()).masterChannel <- e
 		}
 	}
 }
 
 func (n *Namespace) Dump(index int) {
 	if d, ok := n.L2Devices[index]; ok {
-		*d.l2EventChannel().dump <- true
-		<-*d.l2EventChannel().dump
+		*d.L2EventChannel().dump <- true
+		<-*d.L2EventChannel().dump
 		if l3d, ok := n.L3Devices[index]; ok {
-			*l3d.l3EventChannel().dumpChannel <- true
-			<-*l3d.l3EventChannel().dumpChannel
+			*l3d.L3EventChannel().dumpChannel <- true
+			<-*l3d.L3EventChannel().dumpChannel
 		}
 	} else {
 		fmt.Println("No device with the index")
@@ -221,13 +223,13 @@ func (n *Namespace) Dump(index int) {
 
 func (n *Namespace) DumpAll() {
 	for _, value := range n.L3Devices {
-		*value.l3EventChannel().dumpChannel <- true
-		_ = <-*value.l3EventChannel().dumpChannel
+		*value.L3EventChannel().dumpChannel <- true
+		_ = <-*value.L3EventChannel().dumpChannel
 	}
 	for index, _ := range n.L2Devices {
 		if dev, ok := n.L2Devices[index]; !ok {
-			*dev.l2EventChannel().dump <- true
-			<-*dev.l2EventChannel().dump
+			*dev.L2EventChannel().dump <- true
+			<-*dev.L2EventChannel().dump
 		}
 	}
 }
@@ -240,28 +242,38 @@ func (n *Namespace) fire(event NSEvent) {
 
 func (n *Namespace) ChangeDeviceName(devIndex int, newName string) {
 	if d, ok := n.L2Devices[devIndex]; ok {
-		*d.l2EventChannel().nameChannel <- newName
+		*d.L2EventChannel().nameChannel <- newName
 	}
 }
 
+func getNSIndex(namespace string, index int) string {
+	return namespace + ":" + strconv.Itoa(index)
+}
+
 func (n *Namespace) SendVPCreateEvent(event PeerEvent) {
+	fmt.Printf("\ncreate event\n%+v%+v\n", event.Veth, event.Event)
 	//fmt.Printf("CREATE %+v %+v\n", *event.Veth, event.Event)
 	if e, ok := n.topology.GetEvent(event); ok {
 		if e.Event == VPDelete {
-			//fmt.Println("create Got own event\n")
+			fmt.Printf("create previously own delete event\n%+v\n%+v", e.Veth, e.Event)
 			n.topology.RemoveFromBuffer(event.GetIndex())
-			n.topology.Connect(e.PeerNamespace, event.Namespace)
+			n.topology.Disconnect(getNSIndex(e.PeerNamespace, e.PeerIndex), getNSIndex(e.Namespace, e.Index))
 			event.Pair(e.PeerIndex, e.PeerName, e.PeerNamespace)
-			n.topology.Get(e.PeerNamespace).SetVethPeer(e.PeerIndex, event.Veth)
+			//e.Pair(event.PeerIndex, event.PeerName, event.PeerNamespace)
+			n.topology.Get(e.PeerNamespace).SetVethPeer(e.PeerIndex, event.Index, event.Name, event.Namespace)
+			n.topology.Connect(getNSIndex(e.PeerNamespace, event.PeerIndex),
+				getNSIndex(event.Namespace, event.Index))
+			//n.topology.Connect(e.PeerNamespace + ":"+ strings.itoa(e.PeerIndex), event.Namespace + ":" + strings.itoa(event.Index))
 			return
 		}
 	} else if e, ok := n.topology.GetPeerEvent(event); ok {
 		//fmt.Println("Create Got peer event\n")
+		fmt.Printf("create previously peer create event\n%+v\n%+v", e.Veth, e.Event)
 		if e.Event == VPCreate {
 			n.topology.RemoveFromBuffer(event.GetPeerIndex())
-			n.topology.Connect(event.Namespace, e.Namespace)
 			event.Pair(e.Index, e.Name, e.Namespace)
 			e.Pair(event.Index, event.Name, event.Namespace)
+			n.topology.Connect(getNSIndex(event.Namespace, event.Index), getNSIndex(e.Namespace, e.Index))
 			return
 		}
 	}
@@ -269,6 +281,8 @@ func (n *Namespace) SendVPCreateEvent(event PeerEvent) {
 }
 
 func (n *Namespace) SendVPDeleteEvent(event PeerEvent) {
+
+	fmt.Printf("\ndelete event\n%+v%+v\n", event.Veth, event.Event)
 	//if e, ok := n.topology.buffer[event.GetIndex()]; ok {
 	//	//n.topology.Connect()
 	//}
@@ -276,19 +290,22 @@ func (n *Namespace) SendVPDeleteEvent(event PeerEvent) {
 	if e, ok := n.topology.GetEvent(event); ok {
 		//fmt.Println("Got own event\n")
 		if e.Event == VPCreate {
+			fmt.Printf("delete previously own create event\n%+v\n%+v", e.Veth, e.Event)
 			n.topology.RemoveFromBuffer(event.GetIndex())
-			e.Pair(event.Index, event.Name, event.Namespace)
-			n.topology.Get(e.PeerNamespace).SetVethPeer(e.PeerIndex, e.Veth)
-			n.topology.Connect(e.Namespace, event.PeerNamespace)
+			e.Pair(event.PeerIndex, event.PeerName, event.PeerNamespace)
+			n.topology.Get(e.PeerNamespace).SetVethPeer(event.PeerIndex, e.Index, e.Name, e.Namespace)
+			n.topology.Disconnect(getNSIndex(event.Namespace, event.Index), getNSIndex(event.PeerNamespace, event.PeerIndex))
+			n.topology.Connect(getNSIndex(e.Namespace, e.Index), getNSIndex(event.PeerNamespace, event.PeerIndex))
 			return
 		}
 	} else if e, ok := n.topology.GetPeerEvent(event); ok {
 		//fmt.Println("Got peer event\n")
+		fmt.Printf("delete previously peer delete event\n%+v\n%+v", e.Veth, e.Event)
 		if e.Event == VPDelete {
 			e.fireChangeEvents(VethDelete)
 			event.fireChangeEvents(VethDelete)
 			n.topology.RemoveFromBuffer(event.GetPeerIndex())
-			n.topology.Disconnect(e.Namespace, event.Namespace)
+			n.topology.Disconnect(getNSIndex(e.Namespace, e.Index), getNSIndex(event.Namespace, event.Index))
 			return
 		}
 	}
@@ -296,39 +313,50 @@ func (n *Namespace) SendVPDeleteEvent(event PeerEvent) {
 }
 
 func (n *Namespace) Connect(ns string) {
-	if nTemp, ok := n.Connections[ns]; ok {
-		if nTemp == ns {
-			return
+	if n != nil {
+		if nTemp, ok := n.Connections[ns]; ok {
+			if nTemp == ns {
+				return
+			}
 		}
+		n.Connections[ns] = ns
+		n.fire(NSConnect)
+		//peerNs := n.topology.Get(ns)
+		//if peerNs != nil {
+		//	n.Connections[ns] = peerNs.Name
+		//	n.fire(NSConnect)
+		//}
+	} else {
+		fmt.Println("\n\nnamespace", ns, "nil\n\n")
 	}
-	n.Connections[ns] = (*n.topology.Get(ns)).Name
-	n.fire(NSConnect)
 	return
 }
 
 func (n *Namespace) Disconnect(ns string) {
-	if nTemp, ok := n.Connections[ns]; ok {
-		if nTemp == ns {
-			delete(n.Connections, ns)
-		}
+	fmt.Println("\n\nDisconnecting", n.Name, ns)
+	if _, ok := n.Connections[ns]; ok {
+		delete(n.Connections, ns)
+		n.fire(NSDisconnect)
 	}
-	n.fire(NSDisconnect)
 	return
 }
 
 func (n *Namespace) GetVeth(dev int) *Veth {
-	if d, ok := n.L2Devices[dev]; ok {
-		if v, ok := d.(*Veth); ok {
-			return v
+	if n != nil {
+		if d, ok := n.L2Devices[dev]; ok {
+			if v, ok := d.(*Veth); ok {
+				return v
+			}
+			return nil
 		}
 		return nil
 	}
 	return nil
 }
 
-func (n *Namespace) SetVethPeer(dev int, peer *Veth) {
+func (n *Namespace) SetVethPeer(dev int, peerIndex int, peerName, peerNamespace string) {
 	if v := n.GetVeth(dev); v != nil {
-		v.Pair(peer.Index, peer.Name, peer.Namespace)
+		v.Pair(peerIndex, peerName, peerNamespace)
 	}
 	return
 }
@@ -348,6 +376,11 @@ func (n *Namespace) Delete() {
 	n.fire(NSDelete)
 }
 func (n *Namespace) AddRoute(route netlink.Route) {
+	for _, r := range n.Routes {
+		if route.Equal(r) {
+			return
+		}
+	}
 	n.Routes = append(n.Routes, route)
 	n.fire(NSRouteAdd)
 }

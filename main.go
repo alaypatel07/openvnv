@@ -25,29 +25,31 @@ var consoleDisplay *bool
 var dumpIP *string
 var encoder *json.Encoder
 
-func getEncoder() *json.Encoder {
-	if encoder == nil {
-		encoder = json.NewEncoder(os.Stdout)
-	}
-	return encoder
-}
-
 func defaultL3Callback() func(device *devices.L3Device, event devices.L3DeviceEvent) {
-	encoder = getEncoder()
+	encoder = devices.GetEncoder()
 	return func(device *devices.L3Device, event devices.L3DeviceEvent) {
 		t := make(map[string]interface{})
-		t["event"] = event.String()
-		t["index"] = device.Index
+		t["name"] = device.Index
 		t["namespace"] = device.Namespace
 		t["addresses"] = device.IP
+		t["connections"] = device.L2EventChannel().Master
+		t["indexName"] = "device1"
+		switch event {
+		case devices.L3DeviceCreate:
+			t["event"] = "create"
+		case devices.L3DeviceDelete:
+			t["event"] = "delete"
+		default:
+			t["event"] = "update"
+		}
 		encoder.Encode(t)
 	}
 }
 
 func defaultNSCallback() func(namespace *devices.Namespace, event devices.NSEvent) {
-	encoder := getEncoder()
+	encoder := devices.GetEncoder()
 
-	getKeys := func(m map[string]string) []string {
+	getKeys := func(name string, m map[string]string) []string {
 		keys := make([]string, 0, len(m))
 		for k := range m {
 			keys = append(keys, k)
@@ -78,30 +80,36 @@ func defaultNSCallback() func(namespace *devices.Namespace, event devices.NSEven
 
 	return func(namespace *devices.Namespace, change devices.NSEvent) {
 		t := make(map[string]interface{})
-		t["event"] = change.String()
 		t["name"] = namespace.Name
+		t["indexName"] = "namespace1"
+		t["connection"] = getKeys(namespace.Name, namespace.Connections)
+		t["route"] = getRoutes(namespace.Routes)
+		t["mode"] = namespace.Type
 		switch change {
+		case devices.NSCreate:
+			t["event"] = "create"
 		case devices.NSTypeChange:
-			t["type"] = namespace.Type
+			t["event"] = "update"
 		case devices.NSConnect:
-			t["connections"] = getKeys(namespace.Connections)
+			t["event"] = "update"
 		case devices.NSDisconnect:
-			t["connections"] = getKeys(namespace.Connections)
+			t["event"] = "update"
 		case devices.NSRouteAdd:
-			t["route"] = getRoutes(namespace.Routes)
+			t["event"] = "update"
 		case devices.NSRouteDelete:
-			t["route"] = getRoutes(namespace.Routes)
+			t["event"] = "update"
 		}
 		encoder.Encode(t)
 	}
 }
 
 func defaultVethCallback() func(veth *devices.Veth, events devices.VethEvent) {
-	encoder := getEncoder()
+	encoder := devices.GetEncoder()
 	return func(veth *devices.Veth, event devices.VethEvent) {
 		t := make(map[string]interface{})
 		t["event"] = event.String()
 		t["name"] = veth.Name
+		t["indexName"] = "device1"
 		t["namespace"] = veth.Namespace
 		t["index"] = veth.Index
 		switch event {
@@ -116,6 +124,7 @@ func defaultVethCallback() func(veth *devices.Veth, events devices.VethEvent) {
 
 func main() {
 	fmt.Println("Hello OpenVNV")
+	go registerWS(":8080")
 	consoleDisplay = flag.Bool("events", false, "Use -events to display events on console")
 	dumpIP = flag.String("ip", "empty", "Use -ip=<ip>:<port> to send events to remote tcp connection")
 	flag.Parse()
@@ -137,13 +146,66 @@ func main() {
 		n := defaultNSCallback()
 		v := defaultVethCallback()
 		d := defaultL3Callback()
+		nws := defaultNSWSCallback()
 		devices.SubscribeAllNamespaceEvents(n)
 		devices.SubscribeAllVethEvents(v)
 		devices.SubscribeAllL3DeviceEvents(d)
+		devices.SubscribeAllNamespaceEvents(nws)
 	}
 	createExistingNamespaces(*consoleDisplay)
 	go netnsTopoligy()
 	dumpTopology()
+}
+func defaultNSWSCallback() func(namespace *devices.Namespace, event devices.NSEvent) {
+	getKeys := func(m map[string]string) []string {
+		keys := make([]string, 0, len(m))
+		for k := range m {
+			z := strings.Split(k, ":")
+			keys = append(keys, z[0])
+		}
+		return keys
+	}
+	getRoutes := func(routes []netlink.Route) []map[string]string {
+		t := make([]map[string]string, len(routes))
+		for i, r := range routes {
+			m := make(map[string]string)
+			if r.Src != nil {
+				m["source"] = fmt.Sprintf("%s", r.Src)
+			}
+			if r.Dst != nil {
+				m["destination"] = fmt.Sprintf("%s", r.Dst)
+			}
+			if r.Gw != nil {
+				m["gateway"] = fmt.Sprintf("%s", r.Gw)
+			}
+			if r.NewDst != nil {
+				m["nexthop"] = fmt.Sprintf("Dst: %s", r.NewDst)
+			}
+			t[i] = m
+		}
+		return t
+	}
+
+	callback := func(namespace *devices.Namespace, event devices.NSEvent) {
+		//fmt.Println("NSWS Called", event, namespace.Routes, namespace.Connections)
+		temp := make(map[string]interface{})
+		temp["name"] = namespace.Name
+		temp["peer"] = getKeys(namespace.Connections)
+		temp["route"] = getRoutes(namespace.Routes)
+		temp["mode"] = namespace.Type
+		e := WsEvents{
+			DeviceType: "namespace",
+			EventData:  temp,
+			EventType:  event.String(),
+		}
+		chans := GetChannels()
+
+		for _, value := range *chans {
+			//fmt.Println("Sending to", s)
+			*value <- e
+		}
+	}
+	return callback
 }
 
 func netnsTopoligy() {
@@ -214,7 +276,9 @@ func dumpTopology() {
 			os.Exit(0)
 		} else if text == "*" {
 			for ns, n := range topology.Namespaces {
-				fmt.Println("\nDevices for namespace", ns)
+				fmt.Println("\nConnections for namespace", ns)
+				fmt.Println(n.Connections)
+				fmt.Println("\nRoutes for namespace", ns)
 				fmt.Println(n.Routes)
 				n.DumpAll()
 			}

@@ -31,19 +31,19 @@ var L3DeviceEventStrings = []string{
 	"L3DeviceDelete",
 }
 
-type l3Channel struct {
+type L3Channel struct {
 	addAddrChannel    *chan *net.IPNet
 	removeAddrChannel *chan *net.IPNet
 	dumpChannel       *chan bool
 	doneChannel       *chan bool
 }
 
-func newL3Channel() l3Channel {
+func newL3Channel() L3Channel {
 	a := make(chan *net.IPNet)
 	r := make(chan *net.IPNet)
 	d := make(chan bool)
 	dc := make(chan bool)
-	return l3Channel{addAddrChannel: &a, removeAddrChannel: &r, dumpChannel: &d, doneChannel: &dc}
+	return L3Channel{addAddrChannel: &a, removeAddrChannel: &r, dumpChannel: &d, doneChannel: &dc}
 }
 
 type L3Device struct {
@@ -53,7 +53,7 @@ type L3Device struct {
 	IP          []string
 	ip          []*net.IPNet
 	onChange    map[L3DeviceEvent][]func(device *L3Device, event L3DeviceEvent)
-	addrChannel l3Channel
+	addrChannel L3Channel
 }
 
 var defaultL3DeviceSubscriber []func(device *L3Device, event L3DeviceEvent)
@@ -69,26 +69,26 @@ func (dev *L3Device) ReceiveAddrUpdate() {
 			dev.AddAddr(a)
 		case a := <-*dev.addrChannel.removeAddrChannel:
 			dev.RemoveAddr(a)
-		case d := <-*dev.l3EventChannel().dumpChannel:
+		case d := <-*dev.L3EventChannel().dumpChannel:
 			if d {
 				dumper.Encode(dev)
-				*dev.l3EventChannel().dumpChannel <- true
+				*dev.L3EventChannel().dumpChannel <- true
 			}
-		case d := <-*dev.l3EventChannel().doneChannel:
+		case d := <-*dev.L3EventChannel().doneChannel:
 			if d {
 				for _, addr := range dev.ip {
 					dev.RemoveAddr(addr)
 				}
 				dev.fireChangeEvents(L3DeviceDelete)
-				*dev.l3EventChannel().doneChannel <- true
-				*dev.l3EventChannel().doneChannel <- true
+				*dev.L3EventChannel().doneChannel <- true
+				*dev.L3EventChannel().doneChannel <- true
 				return
 			}
 		}
 	}
 }
 
-func (dev *L3Device) l3EventChannel() l3Channel {
+func (dev *L3Device) L3EventChannel() L3Channel {
 	return dev.addrChannel
 }
 

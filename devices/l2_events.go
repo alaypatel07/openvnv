@@ -24,8 +24,8 @@ func newL2DeviceMasterEvent(devIndex int, masterIndex int) l2DeviceMasterEvent {
 	return l2DeviceMasterEvent{devIndex, masterIndex}
 }
 
-type l2Channel struct {
-	master        int
+type L2channel struct {
+	Master        int
 	masterChannel *chan l2DeviceMasterEvent
 	flagsChannel  *chan l2DeviceFlagsEvent
 	nameChannel   *chan string
@@ -33,6 +33,6 @@ type l2Channel struct {
 }
 
 func newL2Channel(masterIndex int, m *chan l2DeviceMasterEvent, f *chan l2DeviceFlagsEvent, n *chan string,
-	d *chan bool) l2Channel {
-	return l2Channel{masterIndex, m, f, n, d}
+	d *chan bool) L2channel {
+	return L2channel{masterIndex, m, f, n, d}
 }
